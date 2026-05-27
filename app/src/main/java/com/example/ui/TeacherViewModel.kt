@@ -407,7 +407,8 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
         duration: String,
         syllabusObjectives: String = "",
         syllabusContent: String = "",
-        customInstructions: String = ""
+        customInstructions: String = "",
+        theme: String = ""
     ) {
         viewModelScope.launch {
             val isFree = _subscriptionPlan.value == "FREE"
@@ -426,7 +427,8 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
                 duration = duration,
                 syllabusObjectives = syllabusObjectives,
                 syllabusContent = syllabusContent,
-                customInstructions = customInstructions
+                customInstructions = customInstructions,
+                theme = theme
             )
 
             if (result.startsWith("Error")) {
@@ -487,7 +489,8 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
         gradeClass: String,
         topic: String,
         difficulty: String,
-        count: Int
+        count: Int,
+        lessonReliancePercent: Int = 0
     ) {
         viewModelScope.launch {
             val isFree = _subscriptionPlan.value == "FREE"
@@ -498,8 +501,10 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
                 return@launch
             }
 
+            val lessonContext = buildLessonNoteContext(subject, gradeClass)
+
             _mcqGenerationState.value = AiGenerationState.Generating
-            val jsonResult = GeminiGenerator.generateMCQs(subject, gradeClass, topic, difficulty, count)
+            val jsonResult = GeminiGenerator.generateMCQs(subject, gradeClass, topic, difficulty, count, lessonContext, lessonReliancePercent)
 
             if (jsonResult == "[]" || jsonResult.isEmpty()) {
                 _mcqGenerationState.value = AiGenerationState.Error("Failed to generate or parse MCQs from academic servers. Please verify key.")
@@ -561,7 +566,8 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
         subject: String,
         gradeClass: String,
         topic: String,
-        count: Int
+        count: Int,
+        lessonReliancePercent: Int = 0
     ) {
         viewModelScope.launch {
             val plan = _subscriptionPlan.value
@@ -572,8 +578,10 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
                 return@launch
             }
 
+            val lessonContext = buildLessonNoteContext(subject, gradeClass)
+
             _theoryGenerationState.value = AiGenerationState.Generating
-            val jsonResult = GeminiGenerator.generateTheoryQuestions(subject, gradeClass, topic, count)
+            val jsonResult = GeminiGenerator.generateTheoryQuestions(subject, gradeClass, topic, count, lessonContext, lessonReliancePercent)
 
             if (jsonResult == "[]" || jsonResult.isEmpty()) {
                 _theoryGenerationState.value = AiGenerationState.Error("Failed to generate standard essay sheets. Ensure API Key works.")
@@ -810,5 +818,16 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
 
     fun getUncompletedNotesCount(): Int {
         return lessonNotes.value.count { it.presentation.isEmpty() }
+    }
+
+    private fun buildLessonNoteContext(subject: String, gradeClass: String): String {
+        val filtered = lessonNotes.value.filter {
+            it.subject.equals(subject, ignoreCase = true) &&
+            it.gradeClass.equals(gradeClass, ignoreCase = true)
+        }
+        if (filtered.isEmpty()) return ""
+        return filtered.joinToString("\n\n---\n\n") { note ->
+            "Topic: ${note.topic}\nContent: ${note.content}".take(3000)
+        }.take(15000)
     }
 }

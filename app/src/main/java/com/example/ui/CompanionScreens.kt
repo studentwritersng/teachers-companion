@@ -1010,9 +1010,11 @@ fun AiHubScreen(
     var selectedDifficulty by remember { mutableStateOf(difficulties[1]) }
     var diffExpanded by remember { mutableStateOf(false) }
     var mcqCount by remember { mutableStateOf(5) }
+    var mcqLessonReliance by remember { mutableIntStateOf(50) }
 
     // 3. Theory specific inputs
     var theoryCount by remember { mutableStateOf(3) }
+    var theoryLessonReliance by remember { mutableIntStateOf(50) }
 
     val lessonState by viewModel.lessonGenerationState.collectAsState()
     val mcqState by viewModel.mcqGenerationState.collectAsState()
@@ -1258,12 +1260,29 @@ fun AiHubScreen(
                                     Text("Questions: $mcqCount", fontSize = 11.sp, color = Color.Gray)
                                     Slider(
                                         value = mcqCount.toFloat(),
-                                        onValueChange = { mcqCount = it.toInt().coerceIn(3, 10) },
-                                        valueRange = 3f..10f,
-                                        steps = 6
+                                        onValueChange = { mcqCount = it.toInt().coerceIn(3, 50) },
+                                        valueRange = 3f..50f,
+                                        steps = 46
                                     )
                                 }
                             }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(Icons.Default.MenuBook, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                Text("Rely on lesson notes:", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("$mcqLessonReliance%", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                            }
+                            Slider(
+                                value = mcqLessonReliance.toFloat(),
+                                onValueChange = { mcqLessonReliance = it.toInt().coerceIn(0, 100) },
+                                valueRange = 0f..100f,
+                                steps = 19
+                            )
+                            Text("${100 - mcqLessonReliance}% from AI knowledge", fontSize = 10.sp, color = Color.Gray, modifier = Modifier.align(Alignment.End))
                         }
 
                         // 3. THEORY ADDS
@@ -1272,10 +1291,26 @@ fun AiHubScreen(
                                 Text("Theory essay questions to generate: $theoryCount", fontSize = 12.sp, color = Color.Gray)
                                 Slider(
                                     value = theoryCount.toFloat(),
-                                    onValueChange = { theoryCount = it.toInt().coerceIn(2, 6) },
-                                    valueRange = 2f..6f,
-                                    steps = 3
+                                    onValueChange = { theoryCount = it.toInt().coerceIn(2, 10) },
+                                    valueRange = 2f..10f,
+                                    steps = 7
                                 )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(Icons.Default.MenuBook, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                    Text("Rely on lesson notes:", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("$theoryLessonReliance%", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                }
+                                Slider(
+                                    value = theoryLessonReliance.toFloat(),
+                                    onValueChange = { theoryLessonReliance = it.toInt().coerceIn(0, 100) },
+                                    valueRange = 0f..100f,
+                                    steps = 19
+                                )
+                                Text("${100 - theoryLessonReliance}% from AI knowledge", fontSize = 10.sp, color = Color.Gray, modifier = Modifier.align(Alignment.End))
                             }
                         }
 
@@ -1289,6 +1324,7 @@ fun AiHubScreen(
                                 val matchedItem = matchingSyllabusItems.find { it.topic.equals(topicText, ignoreCase = true) }
                                 val sObjectives = matchedItem?.objectives ?: ""
                                 val sContent = matchedItem?.content ?: ""
+                                val sTheme = matchedItem?.theme ?: ""
                                 
                                 when (innerTab) {
                                     "note" -> viewModel.generateLessonNote(
@@ -1298,10 +1334,24 @@ fun AiHubScreen(
                                         duration = durationText,
                                         syllabusObjectives = sObjectives,
                                         syllabusContent = sContent,
-                                        customInstructions = lessonCustomInstructions
+                                        customInstructions = lessonCustomInstructions,
+                                        theme = sTheme
                                     )
-                                    "mcq" -> viewModel.generateMCQSets(selectedSubject, selectedClass, topicText, selectedDifficulty, mcqCount)
-                                    "theory" -> viewModel.generateTheoryQuestions(selectedSubject, selectedClass, topicText, theoryCount)
+                                    "mcq" -> viewModel.generateMCQSets(
+                                        subject = selectedSubject,
+                                        gradeClass = selectedClass,
+                                        topic = topicText,
+                                        difficulty = selectedDifficulty,
+                                        count = mcqCount,
+                                        lessonReliancePercent = mcqLessonReliance
+                                    )
+                                    "theory" -> viewModel.generateTheoryQuestions(
+                                        subject = selectedSubject,
+                                        gradeClass = selectedClass,
+                                        topic = topicText,
+                                        count = theoryCount,
+                                        lessonReliancePercent = theoryLessonReliance
+                                    )
                                 }
                             },
                             modifier = Modifier
