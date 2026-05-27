@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Teacher’s Companion",
+  "description": "A personal AI-powered productivity system for West African teachers to generate curriculum lesson notes, WAEC/NECO MCQ/theory exam questions, track syllabus progress, and manage school timetables.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
