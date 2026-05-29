@@ -188,8 +188,10 @@ fun TeacherCompanionApp(viewModel: TeacherViewModel) {
         var activeClassDetails: SchoolClass? by remember { mutableStateOf(null) }
 
         // Trigger tab navigation from Home quick actions
+        var presetInnerTab by remember { mutableStateOf("note") }
         val onQuickAction: (String, String) -> Unit = { tab, presetType ->
             currentTab = tab
+            presetInnerTab = presetType
         }
 
         Scaffold(
@@ -317,7 +319,8 @@ fun TeacherCompanionApp(viewModel: TeacherViewModel) {
                         viewModel = viewModel,
                         onViewNote = { activeLessonDetails = it },
                         onViewMcq = { activeMcqDetails = it },
-                        onViewTheory = { activeTheoryDetails = it }
+                        onViewTheory = { activeTheoryDetails = it },
+                        presetTab = presetInnerTab
                     )
                     "timetable" -> TimetableScreen(viewModel)
                     "syllabus" -> SyllabusScreen(viewModel)
@@ -446,12 +449,15 @@ fun HomeScreen(viewModel: TeacherViewModel, onQuickAction: (String, String) -> U
     val syllabusItems by viewModel.syllabusItems.collectAsState()
     
     // Calculate current day of week (Monday-Friday) to show Today's Timetable
-    val currentDayName = remember {
-        val sdf = SimpleDateFormat("EEEE", Locale.US)
-        sdf.format(Date())
+    var currentDayName by remember { mutableStateOf(SimpleDateFormat("EEEE", Locale.US).format(Date())) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000L)
+            currentDayName = SimpleDateFormat("EEEE", Locale.US).format(Date())
+        }
     }
 
-    val todaysLessons = remember(timetable) {
+    val todaysLessons = remember(timetable, currentDayName) {
         timetable.filter { it.dayOfWeek.equals(currentDayName, ignoreCase = true) }
     }
 
@@ -507,6 +513,45 @@ fun HomeScreen(viewModel: TeacherViewModel, onQuickAction: (String, String) -> U
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // Session expired banner
+        val sessionExpired by viewModel.sessionExpired.collectAsState()
+        if (sessionExpired) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Session Expired", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+                            Text("Data may be outdated. Please log in again to sync.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onErrorContainer)
+                        }
+                        TextButton(onClick = { viewModel.clearSessionExpired() }) {
+                            Text("Dismiss", fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
+        // Sync status indicator
+        val syncStatus by viewModel.syncStatus.collectAsState()
+        if (syncStatus == "syncing") {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.5.dp)
+                    Text("Syncing data...", fontSize = 10.sp, color = Color.Gray)
+                }
+            }
+        }
         // Quick AI Co-Pilot Actions (horizontal, sleek row)
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -941,10 +986,11 @@ fun AiHubScreen(
     viewModel: TeacherViewModel,
     onViewNote: (LessonNote) -> Unit = {},
     onViewMcq: (MCQSet) -> Unit = {},
-    onViewTheory: (TheorySet) -> Unit = {}
+    onViewTheory: (TheorySet) -> Unit = {},
+    presetTab: String = "note"
 ) {
     val context = LocalContext.current
-    var innerTab by remember { mutableStateOf("note") } // note, mcq, theory, history
+    var innerTab by remember { mutableStateOf(presetTab) } // note, mcq, theory, history
 
     val mySchools by viewModel.teacherSchools.collectAsState()
     val myClasses by viewModel.schoolClasses.collectAsState()
@@ -2027,7 +2073,7 @@ fun TimetableScreen(viewModel: TeacherViewModel) {
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                                Box(modifier = Modifier.width(6.dp).height(40.dp).background(Color(android.graphics.Color.parseColor(item.colorHex)), RoundedCornerShape(3.dp)))
+                                Box(modifier = Modifier.width(6.dp).height(40.dp).background(try { Color(android.graphics.Color.parseColor(item.colorHex)) } catch (_: Exception) { Color(0xFF4F81BD) }, RoundedCornerShape(3.dp)))
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column {
                                     Text(
@@ -3467,9 +3513,10 @@ fun ClassDetailsDialog(
 // ==========================================
 @Composable
 fun BillingScreen(viewModel: TeacherViewModel) {
+    val context = LocalContext.current
     val subPlan by viewModel.subscriptionPlan.collectAsState()
-    val checkNotes by viewModel.usageLessonNotes.collectAsState()
-    val checkMCQs by viewModel.usageMcqs.collectAsState()
+    val usedGens by viewModel.usageGenerations.collectAsState()
+    val currentPlanInfo = getPlanInfo(subPlan)
 
     LazyColumn(
         modifier = Modifier
@@ -3478,107 +3525,109 @@ fun BillingScreen(viewModel: TeacherViewModel) {
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            Text("Teacher’s Premium Plans", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            Text("Tailor limits to support multiple school classrooms.", fontSize = 11.sp, color = Color.Gray)
+            Text("Subscription Plans", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text("Pay via Paystack. All prices in Nigerian Naira (₦).", fontSize = 11.sp, color = Color.Gray)
         }
 
-        // Active usages trackers card
+        // Usage meter
         item {
-            Card(
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Interactive Month's AI Meter (Prototyping limits)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text("Lesson Notes Counter: $checkNotes / ${if (subPlan == "FREE") "5 limit" else "Unlimited"}", fontSize = 12.sp)
-                    if (subPlan == "FREE") {
-                        LinearProgressIndicator(progress = { checkNotes.toFloat() / 5f }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
-                    }
+                    Text("Monthly AI Generation Usage", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text("MCQ Compiler Counter: $checkMCQs / ${if (subPlan == "FREE") "10 limit" else "Unlimited"}", fontSize = 12.sp)
-                    if (subPlan == "FREE") {
-                        LinearProgressIndicator(progress = { checkMCQs.toFloat() / 10f }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
-                    }
-
-                    if (subPlan != "FREE") {
-                        Text("✨ Unlimited AI Generator access enabled under the active $subPlan plan!", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                    val maxGen = currentPlanInfo.maxGenerations
+                    val progress = if (maxGen > 0) usedGens.toFloat() / maxGen.toFloat() else 0f
+                    Text("$usedGens / $maxGen generations used this month", fontSize = 12.sp)
+                    if (maxGen > 0) {
+                        LinearProgressIndicator(
+                            progress = { progress.coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            color = if (progress >= 0.8f) Color(0xFFE53935) else MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                        if (progress >= 0.8f) {
+                            Text("Running out of generations!", fontSize = 10.sp, color = Color(0xFFE53935))
+                        }
                     }
                 }
             }
         }
 
-        // Tier Selection grid
-        item {
-            // Plan Tier A: FREE
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                border = if (subPlan == "FREE") BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("🟢 Free Companion Plan", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                        Text("₦0 / Month", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = MaterialTheme.colorScheme.primary)
-                    }
-                    Text("• 5 Curriculum-aligned Lesson Notes / month\n• 10 MCQs limits / month\n• Simple Timetables & Class trackers\n• Standard watermarked PDFs.", fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
-                    
-                    Button(
-                        onClick = { viewModel.updatePlan("FREE") },
-                        enabled = subPlan != "FREE",
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(if (subPlan == "FREE") "Active Plan" else "Select Free")
-                    }
-                }
-            }
-        }
+        // Plan cards
+        val plans = listOf(PLAN_BASIC, PLAN_ADVANCE, PLAN_PREMIUM)
+        plans.forEach { planName ->
+            val info = getPlanInfo(planName)
+            val isActive = subPlan == planName
+            val accentColor = Color(info.color)
 
-        item {
-            // Plan Tier B: STANDARD
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                border = if (subPlan == "STANDARD") BorderStroke(2.dp, Color(0xFF1E88E5)) else null
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("🔵 Standard Plan pro", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                        Text("₦5,000 / Month", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color(0xFF1E88E5))
-                    }
-                    Text("• UNLIMITED Nigeria-Standard Lesson Notes\n• UNLIMITED exam MCQs and explanations\n• UNLIMITED essay/theories generation + grading rubrics\n• Full PDF & Word exports\n• Dynamic Syllabus checklists.", fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
-                    
-                    Button(
-                        onClick = { viewModel.updatePlan("STANDARD") },
-                        enabled = subPlan != "STANDARD",
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E88E5)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(if (subPlan == "STANDARD") "Active Plan" else "Upgrade Standard")
-                    }
-                }
-            }
-        }
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    border = if (isActive) BorderStroke(2.dp, accentColor) else null
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                when (planName) {
+                                    PLAN_ADVANCE -> "🔵 Advance Plan"
+                                    PLAN_PREMIUM -> "⭐ Premium Plan"
+                                    else -> "🟢 Basic Plan"
+                                },
+                                fontWeight = FontWeight.Bold, fontSize = 16.sp
+                            )
+                            Text(
+                                "₦${info.priceNaira}/mo",
+                                fontWeight = FontWeight.Bold, fontSize = 15.sp, color = accentColor
+                            )
+                        }
 
-        item {
-            // Plan Tier C: PREMIUM POWER
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                border = if (subPlan == "PREMIUM") BorderStroke(2.dp, Color(0xFFE65100)) else null
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("⭐ Premium Power Tier", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                        Text("₦10,000 / Month", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color(0xFFE65100))
-                    }
-                    Text("• Everything in Standard Plan PLUS\n• Native Excel / XLS MCQ roster download sheets\n• Custom complex exams combo packages\n• Fast AI Response servers\n• Comprehensive student attendance analytics.", fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
-                    
-                    Button(
-                        onClick = { viewModel.updatePlan("PREMIUM") },
-                        enabled = subPlan != "PREMIUM",
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(if (subPlan == "PREMIUM") "Active Plan" else "Upgrade Premium")
+                        Spacer(modifier = Modifier.height(8.dp))
+                        info.features.forEach { feature ->
+                            Text("• $feature", fontSize = 12.sp, modifier = Modifier.padding(vertical = 1.dp))
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        if (isActive) {
+                            Button(
+                                onClick = {},
+                                enabled = false,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Current Plan")
+                            }
+                        } else {
+                            val isPaidPlan = planName != PLAN_BASIC
+                            Button(
+                                onClick = {
+                                    if (isPaidPlan) {
+                                        val activity = context as? android.app.Activity
+                                        if (activity != null) {
+                                            viewModel.initPaystack(activity)
+                                            val user = viewModel.currentUser.value
+                                            val email = user?.email ?: ""
+                                            viewModel.payForPlan(planName, email) { success, msg ->
+                                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                            }
+                                        } else {
+                                            Toast.makeText(context, "Payment requires an activity context", Toast.LENGTH_SHORT).show()
+                                        }
+                                    } else {
+                                        viewModel.updatePlan(PLAN_BASIC)
+                                        Toast.makeText(context, "Switched to Basic plan", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = accentColor),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(if (isPaidPlan) "Subscribe ₦${info.priceNaira}/mo via Paystack" else "Select Basic")
+                            }
+                        }
                     }
                 }
             }
@@ -3586,10 +3635,13 @@ fun BillingScreen(viewModel: TeacherViewModel) {
 
         item {
             TextButton(
-                onClick = { viewModel.resetLimits(); Toast.makeText(viewModel.getApplication(), "Usage levels reset!", Toast.LENGTH_SHORT).show() },
+                onClick = {
+                    viewModel.resetLimits()
+                    Toast.makeText(context, "Generation counter reset!", Toast.LENGTH_SHORT).show()
+                },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Reset limit levels for planning testing")
+                Text("Reset generation counter (testing)")
             }
         }
     }
@@ -3615,11 +3667,14 @@ fun NotificationsScreen(viewModel: TeacherViewModel, onOpenSettings: () -> Unit)
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED
             ) {
-                ActivityCompat.requestPermissions(
-                    context as android.app.Activity,
-                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                    9001
-                )
+                val activity = context as? android.app.Activity
+                if (activity != null) {
+                    ActivityCompat.requestPermissions(
+                        activity,
+                        arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                        9001
+                    )
+                }
             }
         }
         NotificationHelper.createChannels(context)
@@ -3663,7 +3718,7 @@ fun NotificationsScreen(viewModel: TeacherViewModel, onOpenSettings: () -> Unit)
         // Summary cards
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             // Wake-up status
             Card(
@@ -3672,28 +3727,48 @@ fun NotificationsScreen(viewModel: TeacherViewModel, onOpenSettings: () -> Unit)
                     if (prefs.wakeUpAlarmEnabled) Color(0xFF1B5E20).copy(alpha = 0.1f)
                     else MaterialTheme.colorScheme.surfaceVariant)
             ) {
-                Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.Alarm, null, tint = if (prefs.wakeUpAlarmEnabled) Color(0xFF2E7D32) else Color.Gray, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("Wake-up", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.Alarm, null, tint = if (prefs.wakeUpAlarmEnabled) Color(0xFF2E7D32) else Color.Gray, modifier = Modifier.size(22.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text("Wake-up", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     Text(
                         if (prefs.wakeUpAlarmEnabled) "${"%02d".format(prefs.wakeUpHour)}:${"%02d".format(prefs.wakeUpMinute)}" else "Off",
-                        fontSize = 10.sp, color = Color.Gray
+                        fontSize = 9.sp, color = Color.Gray
                     )
                 }
             }
-            // Reminders status
+            // Daily Schedule status
             Card(
                 modifier = Modifier.weight(1f),
                 colors = CardDefaults.cardColors(containerColor =
-                    if (prefs.scheduleReminderEnabled) Color(0xFF0D47A1).copy(alpha = 0.1f)
+                    if (prefs.dailyScheduleEnabled) Color(0xFF0D47A1).copy(alpha = 0.1f)
                     else MaterialTheme.colorScheme.surfaceVariant)
             ) {
-                Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.Schedule, null, tint = if (prefs.scheduleReminderEnabled) Color(0xFF1565C0) else Color.Gray, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("Reminders", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Text(if (prefs.scheduleReminderEnabled) "${prefs.reminderMinutesBefore} min before" else "Off", fontSize = 10.sp, color = Color.Gray)
+                Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.Today, null, tint = if (prefs.dailyScheduleEnabled) Color(0xFF1565C0) else Color.Gray, modifier = Modifier.size(22.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text("Daily Plan", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (prefs.dailyScheduleEnabled) "${"%02d".format(prefs.dailyScheduleHour)}:${"%02d".format(prefs.dailyScheduleMinute)}" else "Off",
+                        fontSize = 9.sp, color = Color.Gray
+                    )
+                }
+            }
+            // Syllabus reminder
+            Card(
+                modifier = Modifier.weight(1f),
+                colors = CardDefaults.cardColors(containerColor =
+                    if (prefs.syllabusReminderEnabled) Color(0xFF4A148C).copy(alpha = 0.1f)
+                    else MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.AutoStories, null, tint = if (prefs.syllabusReminderEnabled) Color(0xFF6A1B9A) else Color.Gray, modifier = Modifier.size(22.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text("Syllabus", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (prefs.syllabusReminderEnabled) "${"%02d".format(prefs.syllabusReminderHour)}:${"%02d".format(prefs.syllabusReminderMinute)}" else "Off",
+                        fontSize = 9.sp, color = Color.Gray
+                    )
                 }
             }
             // Missed alerts
@@ -3703,11 +3778,11 @@ fun NotificationsScreen(viewModel: TeacherViewModel, onOpenSettings: () -> Unit)
                     if (prefs.missedScheduleAlerts) Color(0xFFB71C1C).copy(alpha = 0.1f)
                     else MaterialTheme.colorScheme.surfaceVariant)
             ) {
-                Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.ErrorOutline, null, tint = if (prefs.missedScheduleAlerts) Color(0xFFC62828) else Color.Gray, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("Missed", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Text(if (prefs.missedScheduleAlerts) "On" else "Off", fontSize = 10.sp, color = Color.Gray)
+                Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.ErrorOutline, null, tint = if (prefs.missedScheduleAlerts) Color(0xFFC62828) else Color.Gray, modifier = Modifier.size(22.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text("Missed", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text(if (prefs.missedScheduleAlerts) "On" else "Off", fontSize = 9.sp, color = Color.Gray)
                 }
             }
         }
@@ -3769,6 +3844,8 @@ fun NotificationsScreen(viewModel: TeacherViewModel, onOpenSettings: () -> Unit)
                                     NotificationType.SCHEDULE_REMINDER -> Icons.Default.Schedule
                                     NotificationType.MISSED_SCHEDULE -> Icons.Default.ErrorOutline
                                     NotificationType.UNCOMPLETED_NOTE -> Icons.Default.EditNote
+                                    NotificationType.DAILY_SCHEDULE -> Icons.Default.Today
+                                    NotificationType.SYLLABUS_REMINDER -> Icons.Default.AutoStories
                                 },
                                 null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp)
                             )
@@ -3809,6 +3886,12 @@ fun NotificationSettingsDialog(
     var reminderMinutes by remember { mutableIntStateOf(currentPrefs.reminderMinutesBefore) }
     var missedAlerts by remember { mutableStateOf(currentPrefs.missedScheduleAlerts) }
     var uncompletedNotes by remember { mutableStateOf(currentPrefs.uncompletedNotesReminder) }
+    var dailyScheduleEnabled by remember { mutableStateOf(currentPrefs.dailyScheduleEnabled) }
+    var dailyScheduleHour by remember { mutableIntStateOf(currentPrefs.dailyScheduleHour) }
+    var dailyScheduleMinute by remember { mutableIntStateOf(currentPrefs.dailyScheduleMinute) }
+    var syllabusReminderEnabled by remember { mutableStateOf(currentPrefs.syllabusReminderEnabled) }
+    var syllabusReminderHour by remember { mutableIntStateOf(currentPrefs.syllabusReminderHour) }
+    var syllabusReminderMinute by remember { mutableIntStateOf(currentPrefs.syllabusReminderMinute) }
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -3894,6 +3977,86 @@ fun NotificationSettingsDialog(
                     }
                 }
 
+                // Daily teaching schedule notification
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Icon(Icons.Default.Today, null, tint = Color(0xFF1565C0), modifier = Modifier.size(20.dp))
+                                Column {
+                                    Text("Daily Teaching Schedule", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text("Morning summary: schools, periods, subjects & hours", fontSize = 10.sp, color = Color.Gray)
+                                }
+                            }
+                            Switch(checked = dailyScheduleEnabled, onCheckedChange = { dailyScheduleEnabled = it })
+                        }
+                        if (dailyScheduleEnabled) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("At:", fontSize = 12.sp)
+                                OutlinedButton(onClick = { dailyScheduleHour = (dailyScheduleHour + 1) % 24 }, modifier = Modifier.weight(1f)) {
+                                    Text("%02d".format(dailyScheduleHour), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Text(":", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                OutlinedButton(onClick = { dailyScheduleMinute = (dailyScheduleMinute + 5) % 60 }, modifier = Modifier.weight(1f)) {
+                                    Text("%02d".format(dailyScheduleMinute), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            Text("Daily at ${"%02d".format(dailyScheduleHour)}:${"%02d".format(dailyScheduleMinute)}", fontSize = 11.sp, color = Color.Gray)
+                        }
+                    }
+                }
+
+                // Syllabus lesson notes reminder
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Icon(Icons.Default.AutoStories, null, tint = Color(0xFF6A1B9A), modifier = Modifier.size(20.dp))
+                                Column {
+                                    Text("Syllabus Notes Reminder", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text("Alerts for topics without lesson notes", fontSize = 10.sp, color = Color.Gray)
+                                }
+                            }
+                            Switch(checked = syllabusReminderEnabled, onCheckedChange = { syllabusReminderEnabled = it })
+                        }
+                        if (syllabusReminderEnabled) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("At:", fontSize = 12.sp)
+                                OutlinedButton(onClick = { syllabusReminderHour = (syllabusReminderHour + 1) % 24 }, modifier = Modifier.weight(1f)) {
+                                    Text("%02d".format(syllabusReminderHour), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Text(":", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                OutlinedButton(onClick = { syllabusReminderMinute = (syllabusReminderMinute + 5) % 60 }, modifier = Modifier.weight(1f)) {
+                                    Text("%02d".format(syllabusReminderMinute), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            Text("Daily at ${"%02d".format(syllabusReminderHour)}:${"%02d".format(syllabusReminderMinute)}", fontSize = 11.sp, color = Color.Gray)
+                        }
+                    }
+                }
+
                 // Other toggles
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -3942,9 +4105,16 @@ fun NotificationSettingsDialog(
                             scheduleReminderEnabled = reminderEnabled,
                             reminderMinutesBefore = reminderMinutes,
                             missedScheduleAlerts = missedAlerts,
-                            uncompletedNotesReminder = uncompletedNotes
+                            uncompletedNotesReminder = uncompletedNotes,
+                            dailyScheduleEnabled = dailyScheduleEnabled,
+                            dailyScheduleHour = dailyScheduleHour,
+                            dailyScheduleMinute = dailyScheduleMinute,
+                            syllabusReminderEnabled = syllabusReminderEnabled,
+                            syllabusReminderHour = syllabusReminderHour,
+                            syllabusReminderMinute = syllabusReminderMinute
                         )
                         viewModel.saveNotificationPrefs(prefs)
+                        viewModel.cacheDataForNotifications()
 
                         NotificationHelper.createChannels(context)
 
@@ -3954,18 +4124,14 @@ fun NotificationSettingsDialog(
                             AlarmScheduler.cancelWakeUpAlarm(context)
                         }
 
-                        if (reminderEnabled || missedAlerts || uncompletedNotes) {
-                            AlarmScheduler.scheduleScheduleCheck(context)
-                        } else {
-                            AlarmScheduler.cancelScheduleCheck(context)
-                        }
+                        AlarmScheduler.scheduleDailyWork(context)
 
                         viewModel.addNotification(
                             AppNotification(
-                                id = NotificationIds.notifCounter++,
+                                id = NotificationIds.notifCounter.getAndIncrement(),
                                 title = "Alert Settings Updated",
                                 body = "Your notification preferences have been saved.",
-                                type = NotificationType.WAKE_UP
+                                type = NotificationType.DAILY_SCHEDULE
                             )
                         )
 
@@ -3985,14 +4151,14 @@ fun NotificationSettingsDialog(
 // 9. SETTINGS SCREEN (accessible from header)
 // ==========================================
 
+@Composable
 fun SettingsScreen(viewModel: TeacherViewModel) {
     val con = LocalContext.current
     val name by viewModel.teacherName.collectAsState()
     val type by viewModel.teacherType.collectAsState()
     val schools by viewModel.teacherSchools.collectAsState()
     val plan by viewModel.subscriptionPlan.collectAsState()
-    val notesCount by viewModel.usageLessonNotes.collectAsState()
-    val mcqsCount by viewModel.usageMcqs.collectAsState()
+    val usedGens by viewModel.usageGenerations.collectAsState()
 
     LazyColumn(
         modifier = Modifier
@@ -4313,22 +4479,20 @@ fun SettingsScreen(viewModel: TeacherViewModel) {
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Monthly AI Generation Usage Tracker", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("Monthly AI Generation Usage", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     
                     Spacer(modifier = Modifier.height(10.dp))
-                    Text("Lesson Notes Active: $notesCount / ${if (plan == "FREE") "5 limit" else "Unlimited"}", fontSize = 12.sp)
-                    if (plan == "FREE") {
-                        LinearProgressIndicator(progress = { notesCount.toFloat() / 5f }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text("MCQ Compiler Items: $mcqsCount / ${if (plan == "FREE") "10 limit" else "Unlimited"}", fontSize = 12.sp)
-                    if (plan == "FREE") {
-                        LinearProgressIndicator(progress = { mcqsCount.toFloat() / 10f }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
-                    }
-
-                    if (plan != "FREE") {
-                        Text("✨ Unlimited co-pilot access active under $plan tier!", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                    val planInfo = getPlanInfo(plan)
+                    val maxGen = planInfo.maxGenerations
+                    val progress = if (maxGen > 0) usedGens.toFloat() / maxGen.toFloat() else 0f
+                    Text("Generations used this month: $usedGens / ${if (maxGen > 0) "$maxGen" else "N/A"}", fontSize = 12.sp)
+                    if (maxGen > 0) {
+                        LinearProgressIndicator(
+                            progress = { progress.coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            color = if (progress >= 0.8f) Color(0xFFE53935) else MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
                     }
                 }
             }
@@ -4340,51 +4504,34 @@ fun SettingsScreen(viewModel: TeacherViewModel) {
         }
 
         // Tiers
-        // Tier 1: FREE
+        // Tier 1: BASIC
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                border = if (plan == "FREE") BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null
+                border = if (plan == PLAN_BASIC) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("🟢 Free Companion Plan", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("₦0 / Month", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.primary)
+                        Text("🟢 Basic Plan", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("₦1,000 / Month", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.primary)
                     }
-                    Text("• 5 Curriculum-aligned Lesson Notes / month\n• 10 MCQs limits / month\n• Standard watermarked exports\n• Simple 1-School limit onboarding constraint.", fontSize = 11.sp, modifier = Modifier.padding(vertical = 8.dp))
-                    
-                    Button(
-                        onClick = { viewModel.updatePlan("FREE") },
-                        enabled = plan != "FREE",
-                        modifier = Modifier.fillMaxWidth().testTag("plan_free_button")
-                    ) {
-                        Text(if (plan == "FREE") "Current Active Plan" else "Select Free")
-                    }
+                    Text("• Timetable and class management\n• Syllabus tracking\n• Student attendance\n• No AI generation — upgrade for AI features", fontSize = 11.sp, modifier = Modifier.padding(vertical = 8.dp))
                 }
             }
         }
 
-        // Tier 2: STANDARD
+        // Tier 2: ADVANCE
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                border = if (plan == "STANDARD") BorderStroke(2.dp, Color(0xFF1E88E5)) else null
+                border = if (plan == PLAN_ADVANCE) BorderStroke(2.dp, Color(0xFF1E88E5)) else null
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("🔵 Standard Plan pro", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("₦5,000 / Month", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF1E88E5))
+                        Text("🔵 Advance Plan", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("₦2,000 / Month", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF1E88E5))
                     }
-                    Text("• UNLIMITED Nigeria-Standard Lesson Notes\n• UNLIMITED MCQ generation\n• UNLIMITED essay/theories generation + rubric rubrics\n• Full PDF & Word DOCX exports\n• Dynamic Syllabus checklists\n• Setup support for up to 3 Part-Time Schools.", fontSize = 11.sp, modifier = Modifier.padding(vertical = 8.dp))
-                    
-                    Button(
-                        onClick = { viewModel.updatePlan("STANDARD") },
-                        enabled = plan != "STANDARD",
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E88E5)),
-                        modifier = Modifier.fillMaxWidth().testTag("plan_standard_button")
-                    ) {
-                        Text(if (plan == "STANDARD") "Current Active Plan" else "Upgrade Standard")
-                    }
+                    Text("• Everything in Basic\n• 20 AI generations per month\n• Lesson notes, MCQs & Theory\n• PDF, Word & Excel exports", fontSize = 11.sp, modifier = Modifier.padding(vertical = 8.dp))
                 }
             }
         }
@@ -4393,23 +4540,14 @@ fun SettingsScreen(viewModel: TeacherViewModel) {
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                border = if (plan == "PREMIUM") BorderStroke(2.dp, Color(0xFFE65100)) else null
+                border = if (plan == PLAN_PREMIUM) BorderStroke(2.dp, Color(0xFFE65100)) else null
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("⭐ Premium Power Tier", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("₦10,000 / Month", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFFE65100))
+                        Text("⭐ Premium Plan", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("₦4,000 / Month", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFFE65100))
                     }
-                    Text("• Everything in Standard Plan PLUS\n• Fast response AI servers priority\n• XLS MCQ student roster download sheets\n• Setup support for up to 10 Part-Time Schools.", fontSize = 11.sp, modifier = Modifier.padding(vertical = 8.dp))
-                    
-                    Button(
-                        onClick = { viewModel.updatePlan("PREMIUM") },
-                        enabled = plan != "PREMIUM",
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100)),
-                        modifier = Modifier.fillMaxWidth().testTag("plan_premium_button")
-                    ) {
-                        Text(if (plan == "PREMIUM") "Current Active Plan" else "Upgrade Premium")
-                    }
+                    Text("• Everything in Advance\n• 50 AI generations per month\n• Priority AI processing\n• Unlimited exports", fontSize = 11.sp, modifier = Modifier.padding(vertical = 8.dp))
                 }
             }
         }

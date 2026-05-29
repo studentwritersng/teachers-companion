@@ -9,12 +9,12 @@ plugins {
 
 android {
   namespace = "com.example"
-  compileSdk { version = release(36) { minorApiLevel = 1 } }
+  compileSdk = 35
 
   defaultConfig {
     applicationId = "com.aistudio.teacherscompanion.trcom"
     minSdk = 24
-    targetSdk = 36
+    targetSdk = 35
     versionCode = 1
     versionName = "1.0"
 
@@ -64,7 +64,8 @@ android {
 secrets {
   propertiesFileName = ".env"
   defaultPropertiesFileName = ".env.example"
-  nonApiKeys = listOf("SUPABASE_URL", "SUPABASE_ANON_KEY")
+  ignoreList.add("SUPABASE_URL")
+  ignoreList.add("SUPABASE_ANON_KEY")
 }
 
 // Some unused dependencies are commented out below instead of being removed.
@@ -111,6 +112,8 @@ dependencies {
   implementation(libs.supabase.realtime.kt)
   implementation(libs.ktor.client.android)
   implementation(libs.kotlinx.serialization.json)
+  implementation(libs.paystack)
+  implementation(libs.androidx.work.runtime.ktx)
 
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)

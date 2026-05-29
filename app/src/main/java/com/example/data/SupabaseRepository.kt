@@ -6,10 +6,10 @@ import io.github.jan.supabase.postgrest.query.Order
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.serialization.json.JsonObject
+import kotlinx.coroutines.flow.first
 import java.util.concurrent.atomic.AtomicInteger
 
-class SupabaseRepository {
+class SupabaseRepository(private val dao: TeacherDao) {
 
     // ── In-memory ID mapping: Supabase UUID → local sequential Int ──
     private val noteIdMap     = mutableMapOf<String, Int>()
@@ -46,6 +46,10 @@ class SupabaseRepository {
     val allSchoolClasses: Flow<List<SchoolClass>>    = _allSchoolClasses.asStateFlow()
     val syllabusSubjects: Flow<List<String>>         = _syllabusSubjects.asStateFlow()
 
+    // ── Sync status ──
+    private val _syncStatus = MutableStateFlow("idle")
+    val syncStatus: Flow<String> = _syncStatus.asStateFlow()
+
     // ── Helper ──
     private suspend fun currentUserId(): String? {
         return try {
@@ -54,77 +58,182 @@ class SupabaseRepository {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    //  REFRESH (load all data from Supabase into local state)
+    //  REFRESH (load all data from Supabase, fall back to Room)
     // ══════════════════════════════════════════════════════════════════
 
     suspend fun refreshAll() {
+        _syncStatus.value = "syncing"
         refreshLessonNotes()
         refreshMCQSets()
         refreshTheorySets()
         refreshTimetableItems()
         refreshSyllabusItems()
         refreshSchoolClasses()
+        _syncStatus.value = "done"
     }
 
     private suspend fun refreshLessonNotes() {
-        val uid = currentUserId() ?: return
-        try {
-            val dtos = SupabaseClient.postgrest["lesson_notes"]
-                .select { order("created_at" to Order.DESCENDING) }
-                .decodeList<LessonNoteDto>()
-            _allLessonNotes.value = dtos.filter { it.userId == uid }.map { it.toEntity() }
-        } catch (_: Exception) { _allLessonNotes.value = emptyList() }
+        val uid = currentUserId()
+        if (uid != null) {
+            try {
+                val dtos = SupabaseClient.postgrest["lesson_notes"]
+                    .select { order("created_at" to Order.DESCENDING) }
+                    .decodeList<LessonNoteDto>()
+                val entities = dtos.filter { it.userId == uid }.map { it.toEntity() }
+                _allLessonNotes.value = entities
+                cacheLessonNotesToRoom(entities)
+                return
+            } catch (_: Exception) { }
+        }
+        loadLessonNotesFromRoom()
     }
 
     private suspend fun refreshMCQSets() {
-        val uid = currentUserId() ?: return
-        try {
-            val dtos = SupabaseClient.postgrest["mcq_sets"]
-                .select { order("created_at" to Order.DESCENDING) }
-                .decodeList<McqSetDto>()
-            _allMCQSets.value = dtos.filter { it.userId == uid }.map { it.toEntity() }
-        } catch (_: Exception) { _allMCQSets.value = emptyList() }
+        val uid = currentUserId()
+        if (uid != null) {
+            try {
+                val dtos = SupabaseClient.postgrest["mcq_sets"]
+                    .select { order("created_at" to Order.DESCENDING) }
+                    .decodeList<McqSetDto>()
+                val entities = dtos.filter { it.userId == uid }.map { it.toEntity() }
+                _allMCQSets.value = entities
+                cacheMCQSetsToRoom(entities)
+                return
+            } catch (_: Exception) { }
+        }
+        loadMCQSetsFromRoom()
     }
 
     private suspend fun refreshTheorySets() {
-        val uid = currentUserId() ?: return
-        try {
-            val dtos = SupabaseClient.postgrest["theory_sets"]
-                .select { order("created_at" to Order.DESCENDING) }
-                .decodeList<TheorySetDto>()
-            _allTheorySets.value = dtos.filter { it.userId == uid }.map { it.toEntity() }
-        } catch (_: Exception) { _allTheorySets.value = emptyList() }
+        val uid = currentUserId()
+        if (uid != null) {
+            try {
+                val dtos = SupabaseClient.postgrest["theory_sets"]
+                    .select { order("created_at" to Order.DESCENDING) }
+                    .decodeList<TheorySetDto>()
+                val entities = dtos.filter { it.userId == uid }.map { it.toEntity() }
+                _allTheorySets.value = entities
+                cacheTheorySetsToRoom(entities)
+                return
+            } catch (_: Exception) { }
+        }
+        loadTheorySetsFromRoom()
     }
 
     private suspend fun refreshTimetableItems() {
-        val uid = currentUserId() ?: return
-        try {
-            val dtos = SupabaseClient.postgrest["timetable_items"]
-                .select { order("start_time" to Order.ASCENDING) }
-                .decodeList<TimetableItemDto>()
-            _allTimetableItems.value = dtos.filter { it.userId == uid }.map { it.toEntity() }
-        } catch (_: Exception) { _allTimetableItems.value = emptyList() }
+        val uid = currentUserId()
+        if (uid != null) {
+            try {
+                val dtos = SupabaseClient.postgrest["timetable_items"]
+                    .select { order("start_time" to Order.ASCENDING) }
+                    .decodeList<TimetableItemDto>()
+                val entities = dtos.filter { it.userId == uid }.map { it.toEntity() }
+                _allTimetableItems.value = entities
+                cacheTimetableToRoom(entities)
+                return
+            } catch (_: Exception) { }
+        }
+        loadTimetableFromRoom()
     }
 
     private suspend fun refreshSyllabusItems() {
-        val uid = currentUserId() ?: return
-        try {
-            val dtos = SupabaseClient.postgrest["syllabus_items"]
-                .select { order("id" to Order.ASCENDING) }
-                .decodeList<SyllabusItemDto>()
-            _allSyllabusItems.value = dtos.filter { it.userId == uid }.map { it.toEntity() }
-            _syllabusSubjects.value = _allSyllabusItems.value.map { it.subject }.distinct()
-        } catch (_: Exception) { _allSyllabusItems.value = emptyList() }
+        val uid = currentUserId()
+        if (uid != null) {
+            try {
+                val dtos = SupabaseClient.postgrest["syllabus_items"]
+                    .select { order("id" to Order.ASCENDING) }
+                    .decodeList<SyllabusItemDto>()
+                val entities = dtos.filter { it.userId == uid }.map { it.toEntity() }
+                _allSyllabusItems.value = entities
+                _syllabusSubjects.value = entities.map { it.subject }.distinct()
+                cacheSyllabusToRoom(entities)
+                return
+            } catch (_: Exception) { }
+        }
+        loadSyllabusFromRoom()
     }
 
     private suspend fun refreshSchoolClasses() {
-        val uid = currentUserId() ?: return
+        val uid = currentUserId()
+        if (uid != null) {
+            try {
+                val dtos = SupabaseClient.postgrest["school_classes"]
+                    .select { order("class_name" to Order.ASCENDING) }
+                    .decodeList<SchoolClassDto>()
+                val entities = dtos.filter { it.userId == uid }.map { it.toEntity() }
+                _allSchoolClasses.value = entities
+                cacheClassesToRoom(entities)
+                return
+            } catch (_: Exception) { }
+        }
+        loadClassesFromRoom()
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    //  ROOM CACHE: Write (after successful Supabase fetch)
+    // ══════════════════════════════════════════════════════════════════
+
+    private suspend fun cacheLessonNotesToRoom(entities: List<LessonNote>) {
+        try { dao.deleteAllLessonNotes(); entities.forEach { dao.insertLessonNote(it) } } catch (_: Exception) {}
+    }
+    private suspend fun cacheMCQSetsToRoom(entities: List<MCQSet>) {
+        try { dao.deleteAllMCQSets(); entities.forEach { dao.insertMCQSet(it) } } catch (_: Exception) {}
+    }
+    private suspend fun cacheTheorySetsToRoom(entities: List<TheorySet>) {
+        try { dao.deleteAllTheorySets(); entities.forEach { dao.insertTheorySet(it) } } catch (_: Exception) {}
+    }
+    private suspend fun cacheTimetableToRoom(entities: List<TimetableItem>) {
+        try { dao.deleteAllTimetableItems(); entities.forEach { dao.insertTimetableItem(it) } } catch (_: Exception) {}
+    }
+    private suspend fun cacheSyllabusToRoom(entities: List<SyllabusItem>) {
+        try { dao.deleteAllSyllabusItems(); entities.forEach { dao.insertSyllabusItem(it) } } catch (_: Exception) {}
+    }
+    private suspend fun cacheClassesToRoom(entities: List<SchoolClass>) {
+        try { dao.deleteAllSchoolClasses(); entities.forEach { dao.insertSchoolClass(it) } } catch (_: Exception) {}
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    //  ROOM CACHE: Read (fallback when Supabase fails)
+    // ══════════════════════════════════════════════════════════════════
+
+    private suspend fun loadLessonNotesFromRoom() {
         try {
-            val dtos = SupabaseClient.postgrest["school_classes"]
-                .select { order("class_name" to Order.ASCENDING) }
-                .decodeList<SchoolClassDto>()
-            _allSchoolClasses.value = dtos.filter { it.userId == uid }.map { it.toEntity() }
-        } catch (_: Exception) { _allSchoolClasses.value = emptyList() }
+            val notes = dao.getAllLessonNotes().firstOrEmpty()
+            if (notes.isNotEmpty()) _allLessonNotes.value = notes
+        } catch (_: Exception) {}
+    }
+    private suspend fun loadMCQSetsFromRoom() {
+        try {
+            val sets = dao.getAllMCQSets().firstOrEmpty()
+            if (sets.isNotEmpty()) _allMCQSets.value = sets
+        } catch (_: Exception) {}
+    }
+    private suspend fun loadTheorySetsFromRoom() {
+        try {
+            val sets = dao.getAllTheorySets().firstOrEmpty()
+            if (sets.isNotEmpty()) _allTheorySets.value = sets
+        } catch (_: Exception) {}
+    }
+    private suspend fun loadTimetableFromRoom() {
+        try {
+            val items = dao.getAllTimetableItems().firstOrEmpty()
+            if (items.isNotEmpty()) _allTimetableItems.value = items
+        } catch (_: Exception) {}
+    }
+    private suspend fun loadSyllabusFromRoom() {
+        try {
+            val items = dao.getAllSyllabusItems().firstOrEmpty()
+            if (items.isNotEmpty()) {
+                _allSyllabusItems.value = items
+                _syllabusSubjects.value = items.map { it.subject }.distinct()
+            }
+        } catch (_: Exception) {}
+    }
+    private suspend fun loadClassesFromRoom() {
+        try {
+            val classes = dao.getAllSchoolClasses().firstOrEmpty()
+            if (classes.isNotEmpty()) _allSchoolClasses.value = classes
+        } catch (_: Exception) {}
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -133,8 +242,10 @@ class SupabaseRepository {
 
     suspend fun insertLessonNote(note: LessonNote): String {
         val uid = currentUserId() ?: return ""
-        val existingUuid = noteIdMap.entries.firstOrNull { it.value == note.id }?.key
-        val dto = note.toDto(uid)
+        val localId = if (note.id == 0) -nextNoteId.getAndIncrement() else note.id
+        val noteWithId = note.copy(id = localId)
+        val existingUuid = noteIdMap.entries.firstOrNull { it.value == localId }?.key
+        val dto = noteWithId.toDto(uid)
         return if (existingUuid != null) {
             SupabaseClient.postgrest["lesson_notes"].update(dto) { eq("id", existingUuid) }
             refreshLessonNotes()
@@ -142,7 +253,7 @@ class SupabaseRepository {
         } else {
             val inserted = SupabaseClient.postgrest["lesson_notes"].insert(dto) { select() }
                 .decodeSingleOrNull<LessonNoteDto>() ?: dto
-            noteIdMap[inserted.id] = note.id
+            noteIdMap[inserted.id] = localId
             refreshLessonNotes()
             inserted.id
         }
@@ -161,8 +272,10 @@ class SupabaseRepository {
 
     suspend fun insertMCQSet(mcqSet: MCQSet): String {
         val uid = currentUserId() ?: return ""
-        val existingUuid = mcqIdMap.entries.firstOrNull { it.value == mcqSet.id }?.key
-        val dto = mcqSet.toDto(uid)
+        val localId = if (mcqSet.id == 0) -nextMcqId.getAndIncrement() else mcqSet.id
+        val setWithId = mcqSet.copy(id = localId)
+        val existingUuid = mcqIdMap.entries.firstOrNull { it.value == localId }?.key
+        val dto = setWithId.toDto(uid)
         return if (existingUuid != null) {
             SupabaseClient.postgrest["mcq_sets"].update(dto) { eq("id", existingUuid) }
             refreshMCQSets()
@@ -170,7 +283,7 @@ class SupabaseRepository {
         } else {
             val inserted = SupabaseClient.postgrest["mcq_sets"].insert(dto) { select() }
                 .decodeSingleOrNull<McqSetDto>() ?: dto
-            mcqIdMap[inserted.id] = mcqSet.id
+            mcqIdMap[inserted.id] = localId
             refreshMCQSets()
             inserted.id
         }
@@ -189,8 +302,10 @@ class SupabaseRepository {
 
     suspend fun insertTheorySet(theorySet: TheorySet): String {
         val uid = currentUserId() ?: return ""
-        val existingUuid = theoryIdMap.entries.firstOrNull { it.value == theorySet.id }?.key
-        val dto = theorySet.toDto(uid)
+        val localId = if (theorySet.id == 0) -nextTheoryId.getAndIncrement() else theorySet.id
+        val setWithId = theorySet.copy(id = localId)
+        val existingUuid = theoryIdMap.entries.firstOrNull { it.value == localId }?.key
+        val dto = setWithId.toDto(uid)
         return if (existingUuid != null) {
             SupabaseClient.postgrest["theory_sets"].update(dto) { eq("id", existingUuid) }
             refreshTheorySets()
@@ -198,7 +313,7 @@ class SupabaseRepository {
         } else {
             val inserted = SupabaseClient.postgrest["theory_sets"].insert(dto) { select() }
                 .decodeSingleOrNull<TheorySetDto>() ?: dto
-            theoryIdMap[inserted.id] = theorySet.id
+            theoryIdMap[inserted.id] = localId
             refreshTheorySets()
             inserted.id
         }
@@ -217,8 +332,10 @@ class SupabaseRepository {
 
     suspend fun insertTimetableItem(item: TimetableItem): String {
         val uid = currentUserId() ?: return ""
-        val existingUuid = ttIdMap.entries.firstOrNull { it.value == item.id }?.key
-        val dto = item.toDto(uid)
+        val localId = if (item.id == 0) -nextTtId.getAndIncrement() else item.id
+        val itemWithId = item.copy(id = localId)
+        val existingUuid = ttIdMap.entries.firstOrNull { it.value == localId }?.key
+        val dto = itemWithId.toDto(uid)
         return if (existingUuid != null) {
             SupabaseClient.postgrest["timetable_items"].update(dto) { eq("id", existingUuid) }
             refreshTimetableItems()
@@ -226,7 +343,7 @@ class SupabaseRepository {
         } else {
             val inserted = SupabaseClient.postgrest["timetable_items"].insert(dto) { select() }
                 .decodeSingleOrNull<TimetableItemDto>() ?: dto
-            ttIdMap[inserted.id] = item.id
+            ttIdMap[inserted.id] = localId
             refreshTimetableItems()
             inserted.id
         }
@@ -245,8 +362,10 @@ class SupabaseRepository {
 
     suspend fun insertSyllabusItem(item: SyllabusItem): String {
         val uid = currentUserId() ?: return ""
-        val existingUuid = syllabusIdMap.entries.firstOrNull { it.value == item.id }?.key
-        val dto = item.toDto(uid)
+        val localId = if (item.id == 0) -nextSyllabusId.getAndIncrement() else item.id
+        val itemWithId = item.copy(id = localId)
+        val existingUuid = syllabusIdMap.entries.firstOrNull { it.value == localId }?.key
+        val dto = itemWithId.toDto(uid)
         return if (existingUuid != null) {
             SupabaseClient.postgrest["syllabus_items"].update(dto) { eq("id", existingUuid) }
             refreshSyllabusItems()
@@ -254,7 +373,7 @@ class SupabaseRepository {
         } else {
             val inserted = SupabaseClient.postgrest["syllabus_items"].insert(dto) { select() }
                 .decodeSingleOrNull<SyllabusItemDto>() ?: dto
-            syllabusIdMap[inserted.id] = item.id
+            syllabusIdMap[inserted.id] = localId
             refreshSyllabusItems()
             inserted.id
         }
@@ -268,13 +387,15 @@ class SupabaseRepository {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    //  SCHOOL CLASSES
+    //  CLASSES
     // ══════════════════════════════════════════════════════════════════
 
     suspend fun insertSchoolClass(schoolClass: SchoolClass): String {
         val uid = currentUserId() ?: return ""
-        val existingUuid = classIdMap.entries.firstOrNull { it.value == schoolClass.id }?.key
-        val dto = schoolClass.toDto(uid)
+        val localId = if (schoolClass.id == 0) -nextClassId.getAndIncrement() else schoolClass.id
+        val classWithId = schoolClass.copy(id = localId)
+        val existingUuid = classIdMap.entries.firstOrNull { it.value == localId }?.key
+        val dto = classWithId.toDto(uid)
         return if (existingUuid != null) {
             SupabaseClient.postgrest["school_classes"].update(dto) { eq("id", existingUuid) }
             refreshSchoolClasses()
@@ -282,7 +403,7 @@ class SupabaseRepository {
         } else {
             val inserted = SupabaseClient.postgrest["school_classes"].insert(dto) { select() }
                 .decodeSingleOrNull<SchoolClassDto>() ?: dto
-            classIdMap[inserted.id] = schoolClass.id
+            classIdMap[inserted.id] = localId
             refreshSchoolClasses()
             inserted.id
         }
@@ -299,49 +420,38 @@ class SupabaseRepository {
     //  STUDENTS
     // ══════════════════════════════════════════════════════════════════
 
-    fun getStudentsByClass(classId: Int): Flow<List<Student>> {
-        return _studentsByClass.getOrPut(classId) { MutableStateFlow(emptyList()) }.asStateFlow()
-    }
-
-    private suspend fun refreshStudentsForClass(localClassId: Int) {
-        val classUuid = classIdMap.entries.firstOrNull { it.value == localClassId }?.key ?: return
-        try {
+    suspend fun getStudentsByClass(classId: Int): List<Student> {
+        val uid = currentUserId() ?: return emptyList()
+        return try {
             val dtos = SupabaseClient.postgrest["students"]
-                .select { eq("class_id", classUuid) }
+                .select { eq("class_id", classIdMap.entries.firstOrNull { it.value == classId }?.key ?: "") }
                 .decodeList<StudentDto>()
-            val students = dtos.map { it.toEntity() }
-            _studentsByClass.getOrPut(localClassId) { MutableStateFlow(emptyList()) }.value = students
-        } catch (_: Exception) {
-            _studentsByClass.getOrPut(localClassId) { MutableStateFlow(emptyList()) }.value = emptyList()
-        }
+            dtos.filter { it.userId == uid }.map { it.toEntity() }
+        } catch (_: Exception) { emptyList() }
     }
 
     suspend fun insertStudent(student: Student): String {
         val uid = currentUserId() ?: return ""
+        val localId = if (student.id == 0) -nextStudentId.getAndIncrement() else student.id
+        val studentWithId = student.copy(id = localId)
         val classUuid = classIdMap.entries.firstOrNull { it.value == student.classId }?.key ?: return ""
-        val existingUuid = studentIdMap.entries.firstOrNull { it.value == student.id }?.key
-        val dto = student.toDto(uid, classUuid)
+        val existingUuid = studentIdMap.entries.firstOrNull { it.value == localId }?.key
+        val dto = studentWithId.toDto(uid, classUuid)
         return if (existingUuid != null) {
             SupabaseClient.postgrest["students"].update(dto) { eq("id", existingUuid) }
-            refreshStudentsForClass(student.classId)
             existingUuid
         } else {
             val inserted = SupabaseClient.postgrest["students"].insert(dto) { select() }
                 .decodeSingleOrNull<StudentDto>() ?: dto
-            studentIdMap[inserted.id] = student.id
-            refreshStudentsForClass(student.classId)
+            studentIdMap[inserted.id] = localId
             inserted.id
         }
     }
 
     suspend fun deleteStudentById(id: Int) {
-        val classId = _studentsByClass.entries.firstOrNull { _, flow ->
-            flow.value.any { it.id == id }
-        }?.key
         val uuid = studentIdMap.entries.firstOrNull { it.value == id }?.key ?: return
         SupabaseClient.postgrest["students"].delete { eq("id", uuid) }
         studentIdMap.remove(uuid)
-        if (classId != null) refreshStudentsForClass(classId)
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -359,36 +469,28 @@ class SupabaseRepository {
 
     suspend fun insertUserAccount(user: UserAccount) {
         val existing = getUserAccount(user.email)
+        val dto = UserAccountDto(
+            id = existing?.id ?: "",
+            authUid = existing?.authUid ?: "",
+            email = user.email.trim().lowercase(),
+            passwordHash = user.passwordHash,
+            fullName = user.fullName,
+            gender = user.gender,
+            dob = user.dob,
+            address = user.address,
+            phone = user.phone,
+            teachingStatus = user.teachingStatus,
+            isOnboardingCompleted = user.isOnboardingCompleted,
+            subscriptionPlan = user.subscriptionPlan,
+            paymentEmail = user.paymentEmail,
+            planExpiresAt = user.planExpiresAt?.let { java.time.Instant.ofEpochMilli(it).toString() },
+            lastPaymentReference = user.lastPaymentReference,
+            lastPaymentDate = user.lastPaymentDate?.let { java.time.Instant.ofEpochMilli(it).toString() }
+        )
         if (existing != null) {
-            SupabaseClient.postgrest["user_accounts"].update(
-                UserAccountDto(
-                    email = user.email.trim().lowercase(),
-                    passwordHash = user.passwordHash,
-                    fullName = user.fullName,
-                    gender = user.gender,
-                    dob = user.dob,
-                    address = user.address,
-                    phone = user.phone,
-                    teachingStatus = user.teachingStatus,
-                    isOnboardingCompleted = user.isOnboardingCompleted,
-                    subscriptionPlan = user.subscriptionPlan
-                )
-            ) { eq("email", user.email.trim().lowercase()) }
+            SupabaseClient.postgrest["user_accounts"].update(dto) { eq("email", user.email.trim().lowercase()) }
         } else {
-            SupabaseClient.postgrest["user_accounts"].insert(
-                UserAccountDto(
-                    email = user.email.trim().lowercase(),
-                    passwordHash = user.passwordHash,
-                    fullName = user.fullName,
-                    gender = user.gender,
-                    dob = user.dob,
-                    address = user.address,
-                    phone = user.phone,
-                    teachingStatus = user.teachingStatus,
-                    isOnboardingCompleted = user.isOnboardingCompleted,
-                    subscriptionPlan = user.subscriptionPlan
-                )
-            )
+            SupabaseClient.postgrest["user_accounts"].insert(dto)
         }
     }
 
@@ -427,31 +529,42 @@ class SupabaseRepository {
     }
 
     suspend fun getSubscriptionPlan(): String {
-        return getPreference("subscription_plan") ?: "PREMIUM"
+        return getPreference("subscription_plan") ?: "BASIC"
     }
 
     suspend fun setSubscriptionPlan(plan: String) {
         setPreference("subscription_plan", plan)
     }
 
-    suspend fun getUsageLimit(key: String): Int {
-        return getPreference("limit_$key")?.toIntOrNull() ?: 0
+    suspend fun getGenerationCount(): Int {
+        val str = getPreference("limit_generations") ?: return 0
+        return str.toIntOrNull() ?: 0
     }
 
-    suspend fun incrementUsageLimit(key: String) {
-        val current = getUsageLimit(key)
-        setPreference("limit_$key", (current + 1).toString())
+    suspend fun incrementGenerationCount() {
+        val current = getGenerationCount()
+        setPreference("limit_generations", (current + 1).toString())
     }
 
     suspend fun resetMonthlyLimits() {
-        setPreference("limit_lesson_notes", "0")
-        setPreference("limit_mcqs", "0")
+        setPreference("limit_generations", "0")
     }
 
-    suspend fun checkAndPrepopulateSyllabus() { /* no-op */ }
+    // ══════════════════════════════════════════════════════════════════
+    //  PLAN MIGRATION (FREE→BASIC, STANDARD→ADVANCE)
+    // ══════════════════════════════════════════════════════════════════
+
+    suspend fun migratePlanIfNeeded(): String {
+        val plan = getSubscriptionPlan()
+        return when (plan) {
+            "FREE" -> { setSubscriptionPlan("BASIC"); "BASIC" }
+            "STANDARD" -> { setSubscriptionPlan("ADVANCE"); "ADVANCE" }
+            else -> plan
+        }
+    }
 
     // ══════════════════════════════════════════════════════════════════
-    //  DTO → ENTITY mapping helpers
+    //  DTO → ENTITY MAPPING
     // ══════════════════════════════════════════════════════════════════
 
     private fun LessonNoteDto.toEntity(): LessonNote {
@@ -569,7 +682,11 @@ class SupabaseRepository {
             phone = phone,
             teachingStatus = teachingStatus,
             isOnboardingCompleted = isOnboardingCompleted,
-            subscriptionPlan = subscriptionPlan
+            subscriptionPlan = subscriptionPlan,
+            paymentEmail = paymentEmail,
+            planExpiresAt = planExpiresAt?.let { parseTimestamp(it) },
+            lastPaymentReference = lastPaymentReference,
+            lastPaymentDate = lastPaymentDate?.let { parseTimestamp(it) }
         )
     }
 
@@ -637,7 +754,7 @@ class SupabaseRepository {
         content = content,
         objectives = objectives,
         isCompleted = isCompleted,
-        completionDate = null
+        completionDate = completionDate?.let { java.time.Instant.ofEpochMilli(it).toString() }
     )
 
     private fun SchoolClass.toDto(uid: String) = SchoolClassDto(
@@ -664,5 +781,11 @@ class SupabaseRepository {
         return try {
             java.time.Instant.parse(iso).toEpochMilli()
         } catch (_: Exception) { System.currentTimeMillis() }
+    }
+
+    private suspend fun <T> Flow<List<T>>.firstOrEmpty(): List<T> {
+        return try {
+            this.first()
+        } catch (_: Exception) { emptyList() }
     }
 }

@@ -1,9 +1,11 @@
 package com.example.ui
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.api.GeminiGenerator
+import com.example.api.PaystackManager
 import com.example.api.supabase.SupabaseClient
 import com.example.data.*
 import com.example.notification.*
@@ -13,6 +15,38 @@ import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import io.github.jan.supabase.gotrue.provider.builtin.Email
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import org.json.JSONArray
+import org.json.JSONObject
+
+const val PLAN_BASIC = "BASIC"
+const val PLAN_ADVANCE = "ADVANCE"
+const val PLAN_PREMIUM = "PREMIUM"
+
+data class PlanInfo(
+    val name: String,
+    val displayName: String,
+    val priceNaira: Int,
+    val maxGenerations: Int,
+    val color: Long,
+    val features: List<String>
+)
+
+fun getPlanInfo(plan: String): PlanInfo = when (plan) {
+    PLAN_BASIC -> PlanInfo(
+        PLAN_BASIC, "Basic", 1000, 0, 0xFF4CAF50,
+        listOf("Timetable & class management", "Syllabus tracking", "Student attendance", "No AI generation")
+    )
+    PLAN_ADVANCE -> PlanInfo(
+        PLAN_ADVANCE, "Advance", 2000, 20, 0xFF1E88E5,
+        listOf("Everything in Basic", "20 AI generations/month", "Lesson notes, MCQs & Theory", "PDF, Word & Excel exports")
+    )
+    PLAN_PREMIUM -> PlanInfo(
+        PLAN_PREMIUM, "Premium", 4000, 50, 0xFFE65100,
+        listOf("Everything in Advance", "50 AI generations/month", "Priority AI processing", "Unlimited exports")
+    )
+    else -> getPlanInfo(PLAN_BASIC)
+}
 
 // --- States representing AI actions ---
 
@@ -42,7 +76,9 @@ data class TheoryModel(
 
 class TeacherViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository = SupabaseRepository()
+    private val repository = SupabaseRepository(
+        (application as com.example.TeacherCompanionApp).database.teacherDao()
+    )
     private val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
 
     // --- AUTHENTICATION & TEACHER PROFILE STATE ---
@@ -65,14 +101,17 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
     val teacherSchools: StateFlow<List<String>> = _teacherSchools.asStateFlow()
 
     // --- SUBSCRIPTION & USAGE STATE ---
-    private val _subscriptionPlan = MutableStateFlow("FREE")
+    private val _subscriptionPlan = MutableStateFlow(PLAN_BASIC)
     val subscriptionPlan: StateFlow<String> = _subscriptionPlan.asStateFlow()
 
-    private val _usageLessonNotes = MutableStateFlow(0)
-    val usageLessonNotes: StateFlow<Int> = _usageLessonNotes.asStateFlow()
+    private val _usageGenerations = MutableStateFlow(0)
+    val usageGenerations: StateFlow<Int> = _usageGenerations.asStateFlow()
 
-    private val _usageMcqs = MutableStateFlow(0)
-    val usageMcqs: StateFlow<Int> = _usageMcqs.asStateFlow()
+    private var _paystackManager: PaystackManager? = null
+
+    fun initPaystack(activity: android.app.Activity) {
+        _paystackManager = PaystackManager(activity)
+    }
 
     // --- NOTIFICATION STATE ---
     private val _notificationPrefs = MutableStateFlow(NotificationPrefs())
@@ -80,6 +119,16 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
 
     private val _notifications = MutableStateFlow<List<AppNotification>>(emptyList())
     val notifications: StateFlow<List<AppNotification>> = _notifications.asStateFlow()
+
+    // --- SESSION STATE ---
+    private val _sessionExpired = MutableStateFlow(false)
+    val sessionExpired: StateFlow<Boolean> = _sessionExpired.asStateFlow()
+
+    fun clearSessionExpired() { _sessionExpired.value = false }
+
+    // --- SYNC STATUS ---
+    val syncStatus: StateFlow<String> = repository.syncStatus
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "idle")
 
     // --- REACTIVE DATA FLOWS FROM SUPABASE ---
     val lessonNotes: StateFlow<List<LessonNote>> = repository.allLessonNotes
@@ -137,6 +186,7 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
                             }
 
                             repository.refreshAll()
+                            cacheDataForNotifications()
                         }
                     }
                 }
@@ -145,14 +195,18 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
             }
 
             _isDarkMode.value = repository.getPreference("is_dark_mode") == "true"
-            _usageLessonNotes.value = repository.getUsageLimit("lesson_notes")
-            _usageMcqs.value = repository.getUsageLimit("mcqs")
+
+            // Migrate old plan names (FREE→BASIC, STANDARD→ADVANCE)
+            val migratedPlan = repository.migratePlanIfNeeded()
+            _subscriptionPlan.value = migratedPlan
+            _usageGenerations.value = repository.getGenerationCount()
 
             // Load notification preferences
             loadNotificationPrefs()
 
             val loggedInEmail = repository.getPreference("logged_in_email") ?: ""
-            if (loggedInEmail.isNotEmpty() && _currentUser.value == null) {
+
+            if (_currentUser.value == null && loggedInEmail.isNotEmpty()) {
                 val acc = repository.getUserAccount(loggedInEmail)
                 if (acc != null) {
                     _currentUser.value = acc
@@ -172,10 +226,9 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
                     }
 
                     repository.refreshAll()
+                    cacheDataForNotifications()
+                    _sessionExpired.value = true
                 }
-            } else {
-                _onboardingCompleted.value = false
-                _subscriptionPlan.value = "FREE"
             }
         }
     }
@@ -208,7 +261,7 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
                     email = trimmedEmail,
                     passwordHash = password,
                     isOnboardingCompleted = false,
-                    subscriptionPlan = "FREE"
+                    subscriptionPlan = PLAN_BASIC
                 )
                 repository.insertUserAccount(newAcc)
                 login(trimmedEmail, password, onResult)
@@ -258,6 +311,8 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
                 }
 
                 repository.refreshAll()
+                delay(200)
+                cacheDataForNotifications()
                 onResult(true, "Successfully logged in!")
             } catch (e: Exception) {
                 val msg = e.message ?: ""
@@ -281,6 +336,15 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
             _teacherName.value = ""
             _teacherType.value = "FULL_TIME"
             _teacherSchools.value = emptyList()
+
+            val context = getApplication<Application>()
+            val notifPrefs = context.getSharedPreferences("notification_prefs", Context.MODE_PRIVATE)
+            notifPrefs.edit()
+                .putString("timetable_cache", "[]")
+                .putString("syllabus_cache", "[]")
+                .putString("lesson_notes_cache", "[]")
+                .apply()
+            com.example.notification.AlarmScheduler.cancelScheduleCheck(context)
         }
     }
 
@@ -319,8 +383,7 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
                 repository.setPreference("teacher_schools_${user.email}", schoolsJson)
             } catch (_: Exception) {}
 
-            // Replace existing classes with onboarded ones
-            schoolClasses.value.forEach { repository.deleteSchoolClassById(it.id) }
+            // Replace existing classes for the onboarded schools
             classes.forEach { schoolClass ->
                 repository.insertSchoolClass(schoolClass)
             }
@@ -376,7 +439,27 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    // --- CHANGE SUBSCRIPTION IN BULK ---
+    // --- SUBSCRIPTION HELPERS ---
+
+    private fun canGenerate(): String? {
+        val plan = _subscriptionPlan.value
+        val planInfo = getPlanInfo(plan)
+        if (planInfo.maxGenerations == 0) {
+            return "Your $planInfo.displayName plan (₦${planInfo.priceNaira}/mo) does not include AI generation. Upgrade to Advance or Premium."
+        }
+        val used = _usageGenerations.value
+        if (used >= planInfo.maxGenerations) {
+            return "You've used all $used/$used AI generations this month. Upgrade to a higher tier or wait for reset."
+        }
+        return null
+    }
+
+    private suspend fun recordGeneration() {
+        repository.incrementGenerationCount()
+        _usageGenerations.value = repository.getGenerationCount()
+    }
+
+    // --- CHANGE SUBSCRIPTION ---
     fun updatePlan(newPlan: String) {
         viewModelScope.launch {
             repository.setSubscriptionPlan(newPlan)
@@ -390,11 +473,52 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    // --- PAYSTACK PAYMENT ---
+    fun payForPlan(planName: String, email: String, onResult: (Boolean, String) -> Unit) {
+        val pm = _paystackManager ?: run {
+            onResult(false, "Payment not initialised. Try again.")
+            return
+        }
+        if (!pm.isConfigured()) {
+            onResult(false, "Paystack not configured. Add PAYSTACK_PUBLIC_KEY to .env")
+            return
+        }
+
+        val planInfo = getPlanInfo(planName)
+        val amountKobo = planInfo.priceNaira * 100
+        val reference = pm.generateReference()
+
+        pm.chargeCard(
+            email = email,
+            amountInKobo = amountKobo,
+            reference = reference,
+            onSuccess = { transaction ->
+                viewModelScope.launch {
+                    updatePlan(planName)
+                    val user = _currentUser.value
+                    if (user != null) {
+                        val updated = user.copy(
+                            subscriptionPlan = planName,
+                            paymentEmail = email,
+                            lastPaymentReference = transaction.reference ?: reference,
+                            lastPaymentDate = System.currentTimeMillis()
+                        )
+                        repository.insertUserAccount(updated)
+                        _currentUser.value = updated
+                    }
+                    onResult(true, "Payment successful! You're now on the ${planInfo.displayName} plan.")
+                }
+            },
+            onError = { message ->
+                onResult(false, message)
+            }
+        )
+    }
+
     fun resetLimits() {
         viewModelScope.launch {
             repository.resetMonthlyLimits()
-            _usageLessonNotes.value = 0
-            _usageMcqs.value = 0
+            _usageGenerations.value = 0
         }
     }
 
@@ -411,11 +535,9 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
         theme: String = ""
     ) {
         viewModelScope.launch {
-            val isFree = _subscriptionPlan.value == "FREE"
-            if (isFree && _usageLessonNotes.value >= 5) {
-                _lessonGenerationState.value = AiGenerationState.Error(
-                    "Monthly Free Plan limit (5 Lesson Notes) exceeded. Please upgrade to Standard or Premium on the Billing tab to enjoy unlimited lesson preparation."
-                )
+            val blockReason = canGenerate()
+            if (blockReason != null) {
+                _lessonGenerationState.value = AiGenerationState.Error(blockReason)
                 return@launch
             }
 
@@ -431,14 +553,11 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
                 theme = theme
             )
 
-            if (result.startsWith("Error")) {
+            if (result.startsWith("Error:") || result.startsWith("Error -") || result.isEmpty()) {
                 _lessonGenerationState.value = AiGenerationState.Error(result)
             } else {
                 _lessonGenerationState.value = AiGenerationState.Success(result)
-                if (isFree) {
-                    repository.incrementUsageLimit("lesson_notes")
-                    _usageLessonNotes.value = repository.getUsageLimit("lesson_notes")
-                }
+                recordGeneration()
             }
         }
     }
@@ -477,6 +596,8 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
             if (matchedSyllabus != null) {
                 repository.insertSyllabusItem(matchedSyllabus.copy(isCompleted = true, completionDate = System.currentTimeMillis()))
             }
+            delay(200)
+            cacheDataForNotifications()
         }
     }
 
@@ -493,11 +614,9 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
         lessonReliancePercent: Int = 0
     ) {
         viewModelScope.launch {
-            val isFree = _subscriptionPlan.value == "FREE"
-            if (isFree && _usageMcqs.value >= 10) {
-                _mcqGenerationState.value = AiGenerationState.Error(
-                    "Monthly Free Plan limit (10 MCQ questions) exceeded. Please upgrade to continue generating standardized exam questions."
-                )
+            val blockReason = canGenerate()
+            if (blockReason != null) {
+                _mcqGenerationState.value = AiGenerationState.Error(blockReason)
                 return@launch
             }
 
@@ -528,12 +647,11 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
                     )
                 }
 
-                _mcqGenerationState.value = AiGenerationState.Success(mcqs)
-
-                if (isFree) {
-                    repository.incrementUsageLimit("mcqs")
-                    _usageMcqs.value = repository.getUsageLimit("mcqs")
+                val isFallback = mcqs.isNotEmpty() && mcqs.first().question.startsWith("Question 1:")
+                if (!isFallback) {
+                    recordGeneration()
                 }
+                _mcqGenerationState.value = AiGenerationState.Success(mcqs)
             } catch (e: Exception) {
                 _mcqGenerationState.value = AiGenerationState.Error("Parsing error: ${e.localizedMessage}")
             }
@@ -570,11 +688,9 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
         lessonReliancePercent: Int = 0
     ) {
         viewModelScope.launch {
-            val plan = _subscriptionPlan.value
-            if (plan == "FREE") {
-                _theoryGenerationState.value = AiGenerationState.Error(
-                    "Theory Question Generator is exclusive to Standard and Premium tiers. Please upgrade on the billing tab to unlock standard theory papers!"
-                )
+            val blockReason = canGenerate()
+            if (blockReason != null) {
+                _theoryGenerationState.value = AiGenerationState.Error(blockReason)
                 return@launch
             }
 
@@ -596,8 +712,12 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
                 val theories = rawList.map { map ->
                     TheoryModel(
                         question = map["question"] ?: "N/A",
-                        markingScheme = map["markingScheme"] ?: map["marking_scheme"] ?: "Mark distribution guideline"
+                        markingScheme = map["suggestedAnswer"] ?: map["suggested_answer"] ?: map["markingScheme"] ?: map["marking_scheme"] ?: "Mark distribution guideline"
                     )
+                }
+                val isFallback = theories.isNotEmpty() && theories.first().question.startsWith("Theory Problem 1:")
+                if (!isFallback) {
+                    recordGeneration()
                 }
                 _theoryGenerationState.value = AiGenerationState.Success(theories)
             } catch (e: Exception) {
@@ -641,18 +761,24 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
                     colorHex = color
                 )
             )
+            delay(200)
+            cacheDataForNotifications()
         }
     }
 
     fun deleteTimetableItem(id: Int) {
         viewModelScope.launch {
             repository.deleteTimetableItemById(id)
+            delay(200)
+            cacheDataForNotifications()
         }
     }
 
     fun toggleTimetableComplete(item: TimetableItem) {
         viewModelScope.launch {
             repository.insertTimetableItem(item.copy(isCompleted = !item.isCompleted))
+            delay(200)
+            cacheDataForNotifications()
         }
     }
 
@@ -664,6 +790,8 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
                 completionDate = if (!item.isCompleted) System.currentTimeMillis() else null
             )
             repository.insertSyllabusItem(updated)
+            delay(200)
+            cacheDataForNotifications()
         }
     }
 
@@ -692,18 +820,24 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
                     objectives = objectives
                 )
             )
+            delay(200)
+            cacheDataForNotifications()
         }
     }
 
     fun updateSyllabusItem(item: SyllabusItem) {
         viewModelScope.launch {
             repository.insertSyllabusItem(item)
+            delay(200)
+            cacheDataForNotifications()
         }
     }
 
     fun deleteSyllabusItem(id: Int) {
         viewModelScope.launch {
             repository.deleteSyllabusItemById(id)
+            delay(200)
+            cacheDataForNotifications()
         }
     }
 
@@ -756,6 +890,8 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
     fun deleteLessonNote(id: Int) {
         viewModelScope.launch {
             repository.deleteLessonNoteById(id)
+            delay(200)
+            cacheDataForNotifications()
         }
     }
 
@@ -781,10 +917,37 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
                 scheduleReminderEnabled = repository.getPreference("notif_schedule_reminder_enabled") != "false",
                 reminderMinutesBefore = repository.getPreference("notif_reminder_minutes")?.toIntOrNull() ?: 15,
                 missedScheduleAlerts = repository.getPreference("notif_missed_alerts") != "false",
-                uncompletedNotesReminder = repository.getPreference("notif_uncompleted_notes") != "false"
+                uncompletedNotesReminder = repository.getPreference("notif_uncompleted_notes") != "false",
+                dailyScheduleEnabled = repository.getPreference("notif_daily_schedule_enabled") != "false",
+                dailyScheduleHour = repository.getPreference("notif_daily_schedule_hour")?.toIntOrNull() ?: 6,
+                dailyScheduleMinute = repository.getPreference("notif_daily_schedule_minute")?.toIntOrNull() ?: 0,
+                syllabusReminderEnabled = repository.getPreference("notif_syllabus_reminder_enabled") != "false",
+                syllabusReminderHour = repository.getPreference("notif_syllabus_reminder_hour")?.toIntOrNull() ?: 7,
+                syllabusReminderMinute = repository.getPreference("notif_syllabus_reminder_minute")?.toIntOrNull() ?: 0
             )
             _notificationPrefs.value = prefs
+            saveNotifPrefsToLocal(prefs)
         }
+    }
+
+    private fun saveNotifPrefsToLocal(prefs: NotificationPrefs) {
+        val context = getApplication<Application>()
+        val localPrefs = context.getSharedPreferences("notification_prefs", Context.MODE_PRIVATE)
+        localPrefs.edit()
+            .putBoolean("wake_up_alarm_enabled", prefs.wakeUpAlarmEnabled)
+            .putInt("wake_up_hour", prefs.wakeUpHour)
+            .putInt("wake_up_minute", prefs.wakeUpMinute)
+            .putBoolean("schedule_reminder_enabled", prefs.scheduleReminderEnabled)
+            .putInt("reminder_minutes_before", prefs.reminderMinutesBefore)
+            .putBoolean("missed_schedule_alerts", prefs.missedScheduleAlerts)
+            .putBoolean("uncompleted_notes_reminder", prefs.uncompletedNotesReminder)
+            .putBoolean("daily_schedule_enabled", prefs.dailyScheduleEnabled)
+            .putInt("daily_schedule_hour", prefs.dailyScheduleHour)
+            .putInt("daily_schedule_minute", prefs.dailyScheduleMinute)
+            .putBoolean("syllabus_reminder_enabled", prefs.syllabusReminderEnabled)
+            .putInt("syllabus_reminder_hour", prefs.syllabusReminderHour)
+            .putInt("syllabus_reminder_minute", prefs.syllabusReminderMinute)
+            .apply()
     }
 
     fun saveNotificationPrefs(prefs: NotificationPrefs) {
@@ -796,7 +959,16 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
             repository.setPreference("notif_reminder_minutes", prefs.reminderMinutesBefore.toString())
             repository.setPreference("notif_missed_alerts", prefs.missedScheduleAlerts.toString())
             repository.setPreference("notif_uncompleted_notes", prefs.uncompletedNotesReminder.toString())
+            repository.setPreference("notif_daily_schedule_enabled", prefs.dailyScheduleEnabled.toString())
+            repository.setPreference("notif_daily_schedule_hour", prefs.dailyScheduleHour.toString())
+            repository.setPreference("notif_daily_schedule_minute", prefs.dailyScheduleMinute.toString())
+            repository.setPreference("notif_syllabus_reminder_enabled", prefs.syllabusReminderEnabled.toString())
+            repository.setPreference("notif_syllabus_reminder_hour", prefs.syllabusReminderHour.toString())
+            repository.setPreference("notif_syllabus_reminder_minute", prefs.syllabusReminderMinute.toString())
             _notificationPrefs.value = prefs
+            saveNotifPrefsToLocal(prefs)
+            val context = getApplication<Application>()
+            AlarmScheduler.scheduleDailyWork(context)
         }
     }
 
@@ -817,7 +989,14 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun getUncompletedNotesCount(): Int {
-        return lessonNotes.value.count { it.presentation.isEmpty() }
+        val notes = lessonNotes.value
+        return syllabusItems.value.count { sItem ->
+            !sItem.isCompleted && notes.none { note ->
+                note.topic.equals(sItem.topic, ignoreCase = true) &&
+                note.gradeClass.equals(sItem.gradeClass, ignoreCase = true) &&
+                note.subject.equals(sItem.subject, ignoreCase = true)
+            }
+        }
     }
 
     private fun buildLessonNoteContext(subject: String, gradeClass: String): String {
@@ -827,7 +1006,58 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
         }
         if (filtered.isEmpty()) return ""
         return filtered.joinToString("\n\n---\n\n") { note ->
-            "Topic: ${note.topic}\nContent: ${note.content}".take(3000)
+            "Topic: ${note.topic}\nContent: ${note.presentation}".take(3000)
         }.take(15000)
+    }
+
+    fun cacheDataForNotifications() {
+        val context = getApplication<Application>()
+        val prefs = context.getSharedPreferences("notification_prefs", Context.MODE_PRIVATE)
+
+        val ttItems = timetableItems.value
+        val sylItems = syllabusItems.value
+        val noteItems = lessonNotes.value
+
+        val ttArray = JSONArray()
+        ttItems.forEach { item ->
+            ttArray.put(JSONObject().apply {
+                put("dayOfWeek", item.dayOfWeek)
+                put("startTime", item.startTime)
+                put("endTime", item.endTime)
+                put("subject", item.subject)
+                put("gradeClass", item.gradeClass)
+                put("schoolName", item.schoolName)
+                put("isCompleted", item.isCompleted)
+            })
+        }
+
+        val syllabusArray = JSONArray()
+        sylItems.forEach { item ->
+            syllabusArray.put(JSONObject().apply {
+                put("subject", item.subject)
+                put("gradeClass", item.gradeClass)
+                put("topic", item.topic)
+                put("week", item.week)
+                put("isCompleted", item.isCompleted)
+                put("schoolName", item.schoolName)
+            })
+        }
+
+        val notesArray = JSONArray()
+        noteItems.forEach { note ->
+            notesArray.put(JSONObject().apply {
+                put("subject", note.subject)
+                put("gradeClass", note.gradeClass)
+                put("topic", note.topic)
+            })
+        }
+
+        prefs.edit()
+            .putString("timetable_cache", ttArray.toString())
+            .putString("syllabus_cache", syllabusArray.toString())
+            .putString("lesson_notes_cache", notesArray.toString())
+            .apply()
+
+        AlarmScheduler.scheduleClassReminders(context)
     }
 }

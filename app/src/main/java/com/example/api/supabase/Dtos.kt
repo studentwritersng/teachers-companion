@@ -17,8 +17,12 @@ data class UserAccountDto(
     val phone: String = "",
     @SerialName("teaching_status") val teachingStatus: String = "FULL_TIME",
     @SerialName("is_onboarding_completed") val isOnboardingCompleted: Boolean = false,
-    @SerialName("subscription_plan") val subscriptionPlan: String = "FREE",
+    @SerialName("subscription_plan") val subscriptionPlan: String = "BASIC",
     val schools: List<String> = emptyList(),
+    @SerialName("payment_email") val paymentEmail: String = "",
+    @SerialName("plan_expires_at") val planExpiresAt: String? = null,
+    @SerialName("last_payment_reference") val lastPaymentReference: String = "",
+    @SerialName("last_payment_date") val lastPaymentDate: String? = null,
     @SerialName("created_at") val createdAt: String = "",
     @SerialName("updated_at") val updatedAt: String = ""
 )

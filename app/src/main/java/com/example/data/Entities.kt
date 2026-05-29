@@ -109,6 +109,10 @@ data class UserAccount(
     val phone: String = "",
     val teachingStatus: String = "FULL_TIME", // "FULL_TIME" or "PART_TIME"
     val isOnboardingCompleted: Boolean = false,
-    val subscriptionPlan: String = "FREE"
+    val subscriptionPlan: String = "BASIC",
+    val paymentEmail: String = "",
+    val planExpiresAt: Long? = null,
+    val lastPaymentReference: String = "",
+    val lastPaymentDate: Long? = null
 )
 
