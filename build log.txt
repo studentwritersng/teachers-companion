@@ -1,0 +1,25 @@
+BUILD FAILED in 34s
+Configuration cache entry discarded due to serialization error.
+Run: test task failed: command failed with exit status 1 (/bitrise/src/gradlew ":app:testDebugUnitTest" ":app:testResultsCollectionDebug" ":app:testResultsCollectionRelease"): check the command's output for details
+
+Export HTML results:
+No artifacts found with pattern: *build/reports/tests that has modification time after: 2026-05-29 19:43:24.371071795 +0000 UTC m=+10.529461540
+Retrying without modtime check....
+
+No artifacts found with pattern: *build/reports/tests without modtime check
+If you have changed default report export path in your gradle files then you might need to change ReportPathPattern accordingly.
+
+Export XML results:
+No artifacts found with pattern: *build/test-results that has modification time after: 2026-05-29 19:43:24.371071795 +0000 UTC m=+10.529461540
+Retrying without modtime check....
+
+No artifacts found with pattern: *build/test-results without modtime check
+If you have changed default report export path in your gradle files then you might need to change ReportPathPattern accordingly.
+
+Export XML results for test addon:
+No artifacts found with pattern: *build/test-results*.xml that has modification time after: 2026-05-29 19:43:24.371071795 +0000 UTC m=+10.529461540
+Retrying without modtime check....
+
+No artifacts found with pattern: *build/test-results*.xml without modtime check
+If you have changed default report export path in your gradle files then you might need to change ReportPathPattern accordingly.
+Running tests failed: command failed with exit status 1 (/bitrise/src/gradlew ":app:testDebugUnitTest" ":app:testResultsCollectionDebug" ":app:testResultsCollectionRelease"): check the command's output for details
