@@ -41,7 +41,7 @@ secretsGradlePlugin = "2.0.1"
 supabase = "2.6.1"
 ktor = "2.3.12"
 kotlinxSerializationJson = "1.6.3"
-paystack = "3.1.2"
+paystack = "3.1.3"
 workRuntime = "2.10.1"
 
 [libraries]
