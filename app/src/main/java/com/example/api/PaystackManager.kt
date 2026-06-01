@@ -4,6 +4,7 @@ import android.app.Activity
 import android.util.Log
 import com.example.BuildConfig
 import co.paystack.android.Paystack
+import co.paystack.android.PaystackSdk
 import co.paystack.android.Transaction
 import co.paystack.android.model.Charge
 import java.text.SimpleDateFormat
@@ -41,14 +42,18 @@ class PaystackManager(private val activity: Activity) {
         }
 
         try {
-            Paystack.setPublicKey(publicKey)
+            PaystackSdk.setPublicKey(publicKey)
 
             val charge = Charge()
             charge.email = email
             charge.amount = amountInKobo
             charge.reference = reference
 
-            Paystack.chargeCard(activity, charge, object : Paystack.TransactionCallback {
+            PaystackSdk.chargeCard(activity, charge, object : Paystack.TransactionCallback {
+                override fun beforeValidate(transaction: Transaction?) {
+                    Log.i("PaystackManager", "Before validate: ${transaction?.reference}")
+                }
+
                 override fun onSuccess(transaction: Transaction?) {
                     Log.i("PaystackManager", "Payment success: ${transaction?.reference}")
                     if (transaction != null) {

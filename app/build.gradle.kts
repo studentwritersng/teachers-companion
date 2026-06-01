@@ -19,6 +19,16 @@ android {
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    val envFile = rootProject.file(".env")
+    if (envFile.exists()) {
+      val envLines = envFile.readLines()
+      fun env(key: String): String = envLines.firstOrNull { it.startsWith("$key=") }?.removePrefix("$key=").orEmpty()
+      val supabaseUrl = env("SUPABASE_URL")
+      val supabaseAnonKey = env("SUPABASE_ANON_KEY")
+      buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
+      buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
+    }
   }
 
   signingConfigs {
@@ -64,8 +74,9 @@ android {
 secrets {
   propertiesFileName = ".env"
   defaultPropertiesFileName = ".env.example"
-  ignoreList.add("SUPABASE_URL")
-  ignoreList.add("SUPABASE_ANON_KEY")
+  // SUPABASE_URL and SUPABASE_ANON_KEY intentionally NOT ignored
+  // so they become accessible as BuildConfig fields from .env
+
 }
 
 // Some unused dependencies are commented out below instead of being removed.

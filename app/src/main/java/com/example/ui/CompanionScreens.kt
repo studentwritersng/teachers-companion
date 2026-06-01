@@ -425,6 +425,7 @@ fun TeacherCompanionApp(viewModel: TeacherViewModel) {
 fun HomeScreen(viewModel: TeacherViewModel, onQuickAction: (String, String) -> Unit) {
     val timetable by viewModel.timetableItems.collectAsState()
     val syllabusItems by viewModel.syllabusItems.collectAsState()
+    val sessionExpired by viewModel.sessionExpired.collectAsState()
     
     // Calculate current day of week (Monday-Friday) to show Today's Timetable
     var currentDayName by remember { mutableStateOf(SimpleDateFormat("EEEE", Locale.US).format(Date())) }
@@ -508,7 +509,6 @@ fun HomeScreen(viewModel: TeacherViewModel, onQuickAction: (String, String) -> U
         }
 
         // Session expired banner
-        val sessionExpired by viewModel.sessionExpired.collectAsState()
         if (sessionExpired) {
             item {
                 Surface(
@@ -948,14 +948,17 @@ fun AiHubScreen(
             },
             containerColor = MaterialTheme.colorScheme.background,
             contentColor = MaterialTheme.colorScheme.primary,
-            indicator = { tabPositions ->
+            indicator = {
                 TabRowDefaults.PrimaryIndicator(
-                    modifier = Modifier.tabIndicatorOffset(tabPositions[when (innerTab) {
-                        "note" -> 0
-                        "mcq" -> 1
-                        "theory" -> 2
-                        else -> 3
-                    }]),
+                    modifier = Modifier.tabIndicatorOffset(
+                        when (innerTab) {
+                            "note" -> 0
+                            "mcq" -> 1
+                            "theory" -> 2
+                            else -> 3
+                        },
+                        false
+                    ),
                     width = 40.dp,
                     shape = RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp)
                 )
@@ -1890,6 +1893,7 @@ fun HistoryScreen(
 }
 
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TimetableScreen(viewModel: TeacherViewModel) {
     val timetable by viewModel.timetableItems.collectAsState()
@@ -1945,9 +1949,12 @@ fun TimetableScreen(viewModel: TeacherViewModel) {
             selectedTabIndex = days.indexOf(selectedDay),
             containerColor = Color.Transparent,
             contentColor = MaterialTheme.colorScheme.primary,
-            indicator = { tabPositions ->
+            indicator = {
                 TabRowDefaults.PrimaryIndicator(
-                    modifier = Modifier.tabIndicatorOffset(tabPositions[days.indexOf(selectedDay)]),
+                    modifier = Modifier.tabIndicatorOffset(
+                        days.indexOf(selectedDay),
+                        false
+                    ),
                     width = 40.dp,
                     shape = RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp)
                 )
@@ -2960,9 +2967,9 @@ fun NotificationsScreen(viewModel: TeacherViewModel, onOpenSettings: () -> Unit)
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            NotificationSummaryCard("Wake-up", prefs.wakeUpAlarmEnabled, Icons.Default.Alarm, "${prefs.wakeUpHour}:${"%02d".format(prefs.wakeUpMinute)}", Modifier.weight(1f))
-            NotificationSummaryCard("Schedule", prefs.dailyScheduleEnabled, Icons.Default.CalendarToday, "${prefs.dailyScheduleHour}:${"%02d".format(prefs.dailyScheduleMinute)}", Modifier.weight(1f))
-            NotificationSummaryCard("Syllabus", prefs.syllabusReminderEnabled, Icons.Default.AutoStories, "${prefs.syllabusReminderHour}:${"%02d".format(prefs.syllabusReminderMinute)}", Modifier.weight(1f))
+            SummaryCard("Wake-up", prefs.wakeUpAlarmEnabled, Icons.Default.Alarm, "${prefs.wakeUpHour}:${"%02d".format(prefs.wakeUpMinute)}", Modifier.weight(1f))
+            SummaryCard("Schedule", prefs.dailyScheduleEnabled, Icons.Default.CalendarToday, "${prefs.dailyScheduleHour}:${"%02d".format(prefs.dailyScheduleMinute)}", Modifier.weight(1f))
+            SummaryCard("Syllabus", prefs.syllabusReminderEnabled, Icons.Default.AutoStories, "${prefs.syllabusReminderHour}:${"%02d".format(prefs.syllabusReminderMinute)}", Modifier.weight(1f))
         }
 
         if (notifications.isEmpty()) {
@@ -3017,7 +3024,7 @@ fun NotificationsScreen(viewModel: TeacherViewModel, onOpenSettings: () -> Unit)
 
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(alert.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                                Text(alert.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(alert.body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
 
                             Text(
@@ -3034,89 +3041,6 @@ fun NotificationsScreen(viewModel: TeacherViewModel, onOpenSettings: () -> Unit)
 
     if (showSettingsDialog) {
         NotificationSettingsDialog(viewModel) { showSettingsDialog = false }
-    }
-}
-
-        // Pending notes alert
-        if (uncompletedCount > 0) {
-            Card(
-                modifier = Modifier.fillMaxWidth().clickable { onOpenSettings() },
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0))
-            ) {
-                Row(
-                    modifier = Modifier.padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Icon(Icons.Default.EditNote, null, tint = Color(0xFFE65100), modifier = Modifier.size(24.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Uncompleted Lesson Notes", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFFE65100))
-                        Text("$uncompletedCount note(s) pending — finish them in AI Hub", fontSize = 11.sp, color = Color.Gray)
-                    }
-                    Icon(Icons.Default.ChevronRight, null, tint = Color.Gray, modifier = Modifier.size(20.dp))
-                }
-            }
-        }
-
-        // Notification list
-        Text("Recent Alerts", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
-
-        if (notifications.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.NotificationsNone, null, tint = Color.Gray, modifier = Modifier.size(48.dp))
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("No alerts yet", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
-                    Text("Set up reminders in the alert settings", fontSize = 11.sp, color = Color.Gray)
-                }
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(notifications) { notif ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth().clickable { viewModel.markNotificationRead(notif.id) },
-                        colors = CardDefaults.cardColors(containerColor = if (!notif.isRead) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surfaceVariant)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Icon(
-                                when (notif.type) {
-                                    NotificationType.WAKE_UP -> Icons.Default.Alarm
-                                    NotificationType.SCHEDULE_REMINDER -> Icons.Default.Schedule
-                                    NotificationType.MISSED_SCHEDULE -> Icons.Default.ErrorOutline
-                                    NotificationType.UNCOMPLETED_NOTE -> Icons.Default.EditNote
-                                    NotificationType.DAILY_SCHEDULE -> Icons.Default.Today
-                                    NotificationType.SYLLABUS_REMINDER -> Icons.Default.AutoStories
-                                },
-                                null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp)
-                            )
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(notif.title, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                Text(notif.body, fontSize = 11.sp, color = Color.Gray, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            }
-                            val sdf = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-                            Text(sdf.format(java.util.Date(notif.timestamp)), fontSize = 10.sp, color = Color.Gray)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if (showSettingsDialog) {
-        NotificationSettingsDialog(
-            viewModel = viewModel,
-            onDismiss = { showSettingsDialog = false }
-        )
     }
 }
 
@@ -3454,9 +3378,9 @@ fun SettingsScreen(viewModel: TeacherViewModel) {
 
                     if (!isEditingProfile) {
                         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                            ProfileInfoItem(Icons.Default.Person, "Full Name", userAccount?.fullName ?: name)
-                            ProfileInfoItem(Icons.Default.Email, "Email Address", userAccount?.email ?: "Guest mode")
-                            ProfileInfoItem(Icons.Default.Work, "Teaching Status", if ((userAccount?.teachingStatus ?: type) == "FULL_TIME") "Full-Time" else "Part-Time")
+                            ProfileRow(Icons.Default.Person, "Full Name", userAccount?.fullName ?: name)
+                            ProfileRow(Icons.Default.Email, "Email Address", userAccount?.email ?: "Guest mode")
+                            ProfileRow(Icons.Default.Work, "Teaching Status", if ((userAccount?.teachingStatus ?: type) == "FULL_TIME") "Full-Time" else "Part-Time")
                             
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -3495,7 +3419,7 @@ fun SettingsScreen(viewModel: TeacherViewModel) {
 
                             Button(
                                 onClick = {
-                                    viewModel.updateProfile(editName, editType)
+                                    viewModel.updateProfile(editName, "", "", "", "", editType)
                                     isEditingProfile = false
                                 },
                                 modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -3755,74 +3679,6 @@ fun TheoryDetailsDialog(theorySet: TheorySet, onDismiss: () -> Unit, onDelete: (
     }
 }
 
-@Composable
-fun TheoryDetailsDialog(theorySet: TheorySet, onDismiss: () -> Unit, onDelete: () -> Unit) {
-    val con = LocalContext.current
-    val moshi = remember { Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build() }
-    
-    val parsedTheories = remember(theorySet.questionsJson) {
-        try {
-            val listType = Types.newParameterizedType(List::class.java, TheoryModel::class.java)
-            val adapter = moshi.adapter<List<TheoryModel>>(listType)
-            adapter.fromJson(theorySet.questionsJson) ?: emptyList()
-        } catch (e: Exception) {
-            emptyList()
-        }
-    }
-
-    Dialog(onDismissRequest = onDismiss) {
-        Card(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.85f).padding(8.dp)) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("Essay Exam view", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, null) }
-                }
-
-                Text(theorySet.title, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                Text("${theorySet.subject} · ${theorySet.gradeClass}", fontSize = 12.sp, color = Color.Gray)
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(parsedTheories) { tItem ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                        ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
-                                Text(tItem.question, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text("Marking scheme guideline:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                                Text(tItem.markingScheme, fontSize = 11.sp, color = Color.DarkGray)
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    IconButton(onClick = onDelete) {
-                        Icon(Icons.Default.Delete, "Delete", tint = Color.Red.copy(alpha = 0.8f))
-                    }
-
-                    Button(
-                        onClick = {
-                            val html = "<h1>${theorySet.subject} Essay Papers</h1><h2>Class: ${theorySet.gradeClass}</h2>" +
-                                    parsedTheories.joinToString("<hr>") { "<h3>Question: ${it.question}</h3><p><b>Marking Guide:</b><br>${it.markingScheme}</p>" }
-                            ExportService.exportToWord(con, theorySet.topic, html)
-                        },
-                        modifier = Modifier.size(height = 36.dp, width = 110.dp),
-                        contentPadding = PaddingValues(0.dp)
-                    ) {
-                        Text("DOCX Word", fontSize = 11.sp)
-                    }
-                }
-            }
-        }
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AuthScreen(viewModel: TeacherViewModel) {
@@ -4012,7 +3868,7 @@ fun OnboardingScreen(viewModel: TeacherViewModel) {
                             if (currentStep < 3) currentStep++
                             else {
                                 val sList = schools.filter { it.isNotBlank() }
-                                viewModel.finishOnboarding(fullName, status, sList, emptyList())
+                                viewModel.finishProfileOnboarding(fullName, status, "", "", "", status, sList, emptyList())
                             }
                         },
                         shape = RoundedCornerShape(12.dp)
@@ -4021,6 +3877,37 @@ fun OnboardingScreen(viewModel: TeacherViewModel) {
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SummaryCard(label: String, enabled: Boolean, icon: androidx.compose.ui.graphics.vector.ImageVector, value: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        color = if (enabled) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(icon, null, modifier = Modifier.size(20.dp), tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun ProfileRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, value: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Icon(icon, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+        Column {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
         }
     }
 }

@@ -1,0 +1,38 @@
+FAILURE: Build failed with an exception.
+* What went wrong:
+Execution failed for task ':app:compileDebugKotlin' (registered by plugin 'com.android.internal.application').
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+BUILD FAILED in 1m 18s
+26 actionable tasks: 25 executed, 1 from cache
+Configuration cache entry stored.
+Run: test task failed: command failed with exit status 1 (/bitrise/src/gradlew ":app:testDebugUnitTest" ":app:testResultsCollectionDebug" ":app:testResultsCollectionRelease"): check the command's output for details
+Export HTML results:
+No artifacts found with pattern: *build/reports/tests that has modification time after: 2026-06-01 02:05:47.34344539 +0000 UTC m=+10.403749760
+Retrying without modtime check....
+No artifacts found with pattern: *build/reports/tests without modtime check
+If you have changed default report export path in your gradle files then you might need to change ReportPathPattern accordingly.
+Export XML results:
+No artifacts found with pattern: *build/test-results that has modification time after: 2026-06-01 02:05:47.34344539 +0000 UTC m=+10.403749760
+Retrying without modtime check....
+No artifacts found with pattern: *build/test-results without modtime check
+If you have changed default report export path in your gradle files then you might need to change ReportPathPattern accordingly.
+Export XML results for test addon:
+No artifacts found with pattern: *build/test-results*.xml that has modification time after: 2026-06-01 02:05:47.34344539 +0000 UTC m=+10.403749760
+Retrying without modtime check....
+No artifacts found with pattern: *build/test-results*.xml without modtime check
+If you have changed default report export path in your gradle files then you might need to change ReportPathPattern accordingly.
+Running tests failed: command failed with exit status 1 (/bitrise/src/gradlew ":app:testDebugUnitTest" ":app:testResultsCollectionDebug" ":app:testResultsCollectionRelease"): check the command's output for details
+Running tests failed: command failed with exit status 1 (/bitrise/src/gradlew ":app:testDebugUnitTest" ":app:testResultsCollectionDebug" ":app:testResultsCollectionRelease"): check the command's output for details
+|                                                                              |
++---+---------------------------------------------------------------+----------+
+| x | Android Unit Test (Failed)                                    | 1.5 min |
++---+---------------------------------------------------------------+----------+
+| Issue tracker: https://github.com/bitrise-steplib/bitrise-step-android-un... |
+| Source: https://github.com/bitrise-steplib/bitrise-step-android-unit-test    |
++---+---------------------------------------------------------------+----------+

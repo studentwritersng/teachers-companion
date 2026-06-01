@@ -12,7 +12,7 @@ import com.example.notification.*
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
-import io.github.jan.supabase.gotrue.provider.builtin.Email
+import io.github.jan.supabase.gotrue.providers.builtin.Email
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -165,7 +165,7 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
                 // Restore Supabase session if available
                 val session = SupabaseClient.auth.currentSessionOrNull()
                 if (session != null) {
-                    val email = session.user.email ?: ""
+                    val email = session.user?.email ?: ""
                     if (email.isNotEmpty()) {
                         val account = repository.getUserAccount(email)
                         if (account != null) {
@@ -251,10 +251,7 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
                 return@launch
             }
             try {
-                SupabaseClient.auth.signUpWith(Email) {
-                    this.email = trimmedEmail
-                    this.password = password
-                }
+                SupabaseClient.auth.signUpWith(Email) { this.email = trimmedEmail; this.password = password }
                 // After sign-up, the DB trigger creates user_accounts row.
                 // We insert additional profile fields separately.
                 val newAcc = UserAccount(
@@ -284,10 +281,7 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
                 return@launch
             }
             try {
-                SupabaseClient.auth.signInWith(Email) {
-                    this.email = trimmedEmail
-                    this.password = password
-                }
+                SupabaseClient.auth.signInWith(Email) { this.email = trimmedEmail; this.password = password }
                 val acc = repository.getUserAccount(trimmedEmail)
                 if (acc == null) {
                     onResult(false, "Account not found. Please register first.")
@@ -860,8 +854,8 @@ class TeacherViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun getStudentsFlow(classId: Int): Flow<List<Student>> {
-        return repository.getStudentsByClass(classId)
+    fun getStudentsFlow(classId: Int): Flow<List<Student>> = kotlinx.coroutines.flow.flow {
+        emit(repository.getStudentsByClass(classId))
     }
 
     fun addStudent(classId: Int, fullName: String, notes: String) {

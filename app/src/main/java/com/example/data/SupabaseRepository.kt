@@ -77,7 +77,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
         if (uid != null) {
             try {
                 val dtos = SupabaseClient.postgrest["lesson_notes"]
-                    .select { order("created_at" to Order.DESCENDING) }
+                    .select { order("created_at", Order.DESCENDING) }
                     .decodeList<LessonNoteDto>()
                 val entities = dtos.filter { it.userId == uid }.map { it.toEntity() }
                 _allLessonNotes.value = entities
@@ -93,7 +93,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
         if (uid != null) {
             try {
                 val dtos = SupabaseClient.postgrest["mcq_sets"]
-                    .select { order("created_at" to Order.DESCENDING) }
+                    .select { order("created_at", Order.DESCENDING) }
                     .decodeList<McqSetDto>()
                 val entities = dtos.filter { it.userId == uid }.map { it.toEntity() }
                 _allMCQSets.value = entities
@@ -109,7 +109,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
         if (uid != null) {
             try {
                 val dtos = SupabaseClient.postgrest["theory_sets"]
-                    .select { order("created_at" to Order.DESCENDING) }
+                    .select { order("created_at", Order.DESCENDING) }
                     .decodeList<TheorySetDto>()
                 val entities = dtos.filter { it.userId == uid }.map { it.toEntity() }
                 _allTheorySets.value = entities
@@ -125,7 +125,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
         if (uid != null) {
             try {
                 val dtos = SupabaseClient.postgrest["timetable_items"]
-                    .select { order("start_time" to Order.ASCENDING) }
+                    .select { order("start_time", Order.ASCENDING) }
                     .decodeList<TimetableItemDto>()
                 val entities = dtos.filter { it.userId == uid }.map { it.toEntity() }
                 _allTimetableItems.value = entities
@@ -141,7 +141,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
         if (uid != null) {
             try {
                 val dtos = SupabaseClient.postgrest["syllabus_items"]
-                    .select { order("id" to Order.ASCENDING) }
+                    .select { order("id", Order.ASCENDING) }
                     .decodeList<SyllabusItemDto>()
                 val entities = dtos.filter { it.userId == uid }.map { it.toEntity() }
                 _allSyllabusItems.value = entities
@@ -158,7 +158,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
         if (uid != null) {
             try {
                 val dtos = SupabaseClient.postgrest["school_classes"]
-                    .select { order("class_name" to Order.ASCENDING) }
+                    .select { order("class_name", Order.ASCENDING) }
                     .decodeList<SchoolClassDto>()
                 val entities = dtos.filter { it.userId == uid }.map { it.toEntity() }
                 _allSchoolClasses.value = entities
@@ -247,7 +247,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
         val existingUuid = noteIdMap.entries.firstOrNull { it.value == localId }?.key
         val dto = noteWithId.toDto(uid)
         return if (existingUuid != null) {
-            SupabaseClient.postgrest["lesson_notes"].update(dto) { eq("id", existingUuid) }
+            SupabaseClient.postgrest["lesson_notes"].update(dto) { filter { eq("id", existingUuid) } }
             refreshLessonNotes()
             existingUuid
         } else {
@@ -261,7 +261,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
 
     suspend fun deleteLessonNoteById(id: Int) {
         val uuid = noteIdMap.entries.firstOrNull { it.value == id }?.key ?: return
-        SupabaseClient.postgrest["lesson_notes"].delete { eq("id", uuid) }
+        SupabaseClient.postgrest["lesson_notes"].delete { filter { eq("id", uuid) } }
         noteIdMap.remove(uuid)
         refreshLessonNotes()
     }
@@ -277,7 +277,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
         val existingUuid = mcqIdMap.entries.firstOrNull { it.value == localId }?.key
         val dto = setWithId.toDto(uid)
         return if (existingUuid != null) {
-            SupabaseClient.postgrest["mcq_sets"].update(dto) { eq("id", existingUuid) }
+            SupabaseClient.postgrest["mcq_sets"].update(dto) { filter { eq("id", existingUuid) } }
             refreshMCQSets()
             existingUuid
         } else {
@@ -291,7 +291,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
 
     suspend fun deleteMCQSetById(id: Int) {
         val uuid = mcqIdMap.entries.firstOrNull { it.value == id }?.key ?: return
-        SupabaseClient.postgrest["mcq_sets"].delete { eq("id", uuid) }
+        SupabaseClient.postgrest["mcq_sets"].delete { filter { eq("id", uuid) } }
         mcqIdMap.remove(uuid)
         refreshMCQSets()
     }
@@ -307,7 +307,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
         val existingUuid = theoryIdMap.entries.firstOrNull { it.value == localId }?.key
         val dto = setWithId.toDto(uid)
         return if (existingUuid != null) {
-            SupabaseClient.postgrest["theory_sets"].update(dto) { eq("id", existingUuid) }
+            SupabaseClient.postgrest["theory_sets"].update(dto) { filter { eq("id", existingUuid) } }
             refreshTheorySets()
             existingUuid
         } else {
@@ -321,7 +321,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
 
     suspend fun deleteTheorySetById(id: Int) {
         val uuid = theoryIdMap.entries.firstOrNull { it.value == id }?.key ?: return
-        SupabaseClient.postgrest["theory_sets"].delete { eq("id", uuid) }
+        SupabaseClient.postgrest["theory_sets"].delete { filter { eq("id", uuid) } }
         theoryIdMap.remove(uuid)
         refreshTheorySets()
     }
@@ -337,7 +337,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
         val existingUuid = ttIdMap.entries.firstOrNull { it.value == localId }?.key
         val dto = itemWithId.toDto(uid)
         return if (existingUuid != null) {
-            SupabaseClient.postgrest["timetable_items"].update(dto) { eq("id", existingUuid) }
+            SupabaseClient.postgrest["timetable_items"].update(dto) { filter { eq("id", existingUuid) } }
             refreshTimetableItems()
             existingUuid
         } else {
@@ -351,7 +351,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
 
     suspend fun deleteTimetableItemById(id: Int) {
         val uuid = ttIdMap.entries.firstOrNull { it.value == id }?.key ?: return
-        SupabaseClient.postgrest["timetable_items"].delete { eq("id", uuid) }
+        SupabaseClient.postgrest["timetable_items"].delete { filter { eq("id", uuid) } }
         ttIdMap.remove(uuid)
         refreshTimetableItems()
     }
@@ -367,7 +367,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
         val existingUuid = syllabusIdMap.entries.firstOrNull { it.value == localId }?.key
         val dto = itemWithId.toDto(uid)
         return if (existingUuid != null) {
-            SupabaseClient.postgrest["syllabus_items"].update(dto) { eq("id", existingUuid) }
+            SupabaseClient.postgrest["syllabus_items"].update(dto) { filter { eq("id", existingUuid) } }
             refreshSyllabusItems()
             existingUuid
         } else {
@@ -381,7 +381,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
 
     suspend fun deleteSyllabusItemById(id: Int) {
         val uuid = syllabusIdMap.entries.firstOrNull { it.value == id }?.key ?: return
-        SupabaseClient.postgrest["syllabus_items"].delete { eq("id", uuid) }
+        SupabaseClient.postgrest["syllabus_items"].delete { filter { eq("id", uuid) } }
         syllabusIdMap.remove(uuid)
         refreshSyllabusItems()
     }
@@ -397,7 +397,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
         val existingUuid = classIdMap.entries.firstOrNull { it.value == localId }?.key
         val dto = classWithId.toDto(uid)
         return if (existingUuid != null) {
-            SupabaseClient.postgrest["school_classes"].update(dto) { eq("id", existingUuid) }
+            SupabaseClient.postgrest["school_classes"].update(dto) { filter { eq("id", existingUuid) } }
             refreshSchoolClasses()
             existingUuid
         } else {
@@ -411,7 +411,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
 
     suspend fun deleteSchoolClassById(id: Int) {
         val uuid = classIdMap.entries.firstOrNull { it.value == id }?.key ?: return
-        SupabaseClient.postgrest["school_classes"].delete { eq("id", uuid) }
+        SupabaseClient.postgrest["school_classes"].delete { filter { eq("id", uuid) } }
         classIdMap.remove(uuid)
         refreshSchoolClasses()
     }
@@ -424,7 +424,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
         val uid = currentUserId() ?: return emptyList()
         return try {
             val dtos = SupabaseClient.postgrest["students"]
-                .select { eq("class_id", classIdMap.entries.firstOrNull { it.value == classId }?.key ?: "") }
+                .select { filter { eq("class_id", classIdMap.entries.firstOrNull { it.value == classId }?.key ?: "") } }
                 .decodeList<StudentDto>()
             dtos.filter { it.userId == uid }.map { it.toEntity() }
         } catch (_: Exception) { emptyList() }
@@ -438,7 +438,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
         val existingUuid = studentIdMap.entries.firstOrNull { it.value == localId }?.key
         val dto = studentWithId.toDto(uid, classUuid)
         return if (existingUuid != null) {
-            SupabaseClient.postgrest["students"].update(dto) { eq("id", existingUuid) }
+            SupabaseClient.postgrest["students"].update(dto) { filter { eq("id", existingUuid) } }
             existingUuid
         } else {
             val inserted = SupabaseClient.postgrest["students"].insert(dto) { select() }
@@ -450,7 +450,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
 
     suspend fun deleteStudentById(id: Int) {
         val uuid = studentIdMap.entries.firstOrNull { it.value == id }?.key ?: return
-        SupabaseClient.postgrest["students"].delete { eq("id", uuid) }
+        SupabaseClient.postgrest["students"].delete { filter { eq("id", uuid) } }
         studentIdMap.remove(uuid)
     }
 
@@ -461,17 +461,21 @@ class SupabaseRepository(private val dao: TeacherDao) {
     suspend fun getUserAccount(email: String): UserAccount? {
         return try {
             SupabaseClient.postgrest["user_accounts"]
-                .select { eq("email", email.trim().lowercase()) }
+                .select { filter { eq("email", email.trim().lowercase()) } }
                 .decodeSingleOrNull<UserAccountDto>()
                 ?.toUserAccountEntity()
         } catch (_: Exception) { null }
     }
 
     suspend fun insertUserAccount(user: UserAccount) {
-        val existing = getUserAccount(user.email)
+        val existingDto = try {
+            SupabaseClient.postgrest["user_accounts"]
+                .select { filter { eq("email", user.email.trim().lowercase()) } }
+                .decodeSingleOrNull<UserAccountDto>()
+        } catch (_: Exception) { null }
         val dto = UserAccountDto(
-            id = existing?.id ?: "",
-            authUid = existing?.authUid ?: "",
+            id = existingDto?.id ?: "",
+            authUid = existingDto?.authUid ?: "",
             email = user.email.trim().lowercase(),
             passwordHash = user.passwordHash,
             fullName = user.fullName,
@@ -487,8 +491,8 @@ class SupabaseRepository(private val dao: TeacherDao) {
             lastPaymentReference = user.lastPaymentReference,
             lastPaymentDate = user.lastPaymentDate?.let { java.time.Instant.ofEpochMilli(it).toString() }
         )
-        if (existing != null) {
-            SupabaseClient.postgrest["user_accounts"].update(dto) { eq("email", user.email.trim().lowercase()) }
+        if (existingDto != null) {
+            SupabaseClient.postgrest["user_accounts"].update(dto) { filter { eq("email", user.email.trim().lowercase()) } }
         } else {
             SupabaseClient.postgrest["user_accounts"].insert(dto)
         }
@@ -502,7 +506,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
         val uid = currentUserId() ?: return null
         return try {
             SupabaseClient.postgrest["user_preferences"]
-                .select { eq("user_id", uid) }
+                .select { filter { eq("user_id", uid) } }
                 .decodeList<UserPreferenceDto>()
                 .firstOrNull { it.key == key }?.value
         } catch (_: Exception) { null }
@@ -512,7 +516,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
         val uid = currentUserId() ?: return
         val existing = try {
             SupabaseClient.postgrest["user_preferences"]
-                .select { eq("user_id", uid) }
+                .select { filter { eq("user_id", uid) } }
                 .decodeList<UserPreferenceDto>()
                 .firstOrNull { it.key == key }
         } catch (_: Exception) { null }
@@ -520,7 +524,7 @@ class SupabaseRepository(private val dao: TeacherDao) {
         if (existing != null) {
             SupabaseClient.postgrest["user_preferences"].update(
                 UserPreferenceDto(userId = uid, key = key, value = value)
-            ) { eq("id", existing.id) }
+            ) { filter { eq("id", existing.id) } }
         } else {
             SupabaseClient.postgrest["user_preferences"].insert(
                 UserPreferenceDto(userId = uid, key = key, value = value)

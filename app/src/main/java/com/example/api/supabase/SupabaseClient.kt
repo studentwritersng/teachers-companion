@@ -3,12 +3,15 @@ package com.example.api.supabase
 import com.example.BuildConfig
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.gotrue.Auth
+import io.github.jan.supabase.gotrue.auth
 import io.github.jan.supabase.postgrest.Postgrest
+import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.realtime.Realtime
+import io.github.jan.supabase.realtime.realtime
 
 object SupabaseClient {
 
-    private val client by lazy {
+    val client by lazy {
         val url = BuildConfig.SUPABASE_URL
         val key = BuildConfig.SUPABASE_ANON_KEY
 
